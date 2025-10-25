@@ -25,6 +25,7 @@ import { messagesToNodesAndEdges } from './utils';
 import type { ChatMessage } from '@/lib/types';
 import type { UseChatHelpers } from '@ai-sdk/react';
 import { loadFlowData, saveFlowData } from '@/lib/db/flow-actions';
+import { useTheme } from 'next-themes';
 
 interface ChatFlowProps {
   chatId: string;
@@ -49,6 +50,17 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
   const [connectingNodeId, setConnectingNodeId] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const { screenToFlowPosition } = useReactFlow();
+
+  const { theme, resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  // Handle mounting to avoid hydration mismatch
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Determine the current theme
+  const currentTheme = theme === 'system' ? resolvedTheme : theme;
 
   // Track node positions to preserve them
   const nodePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
@@ -355,14 +367,24 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
           color="hsl(var(--border))"
         />
         <Controls
+          key={`controls-${currentTheme}`}
           showInteractive={false}
-          className="rounded-md border bg-background/80 shadow-lg backdrop-blur-sm"
+          orientation='horizontal'
+          className="rounded-md border shadow-lg backdrop-blur-sm"
+          style={{background: 'rgba(26, 26, 26, 0.8)'}}
+          // style={{
+          //   backgroundColor: mounted ? (currentTheme === 'dark' ? 'rgba(26, 26, 26, 0.8)' : 'rgba(255, 255, 255, 0.8)') : 'rgba(255, 255, 255, 0.8)',
+          //   borderColor: mounted ? (currentTheme === 'dark' ? '#333333' : '#e5e5e5') : '#e5e5e5',
+          // }}
         />
         <MiniMap
+          key={`minimap-${currentTheme}`}
           nodeStrokeWidth={3}
           className="rounded-md border bg-background/80 shadow-lg backdrop-blur-sm"
           pannable
           zoomable
+          bgColor={mounted ? (currentTheme === 'dark' ? '#1a1a1a' : '#ffffff') : '#ffffff'}
+          maskColor={mounted ? (currentTheme === 'dark' ? '#2a2a2a' : '#ebe8e8') : '#ebe8e8'}
           nodeColor={(node) => {
             if (node.type === 'conversationNode') return '#a855f7';
             if (node.type === 'promptNode') return '#22c55e';
