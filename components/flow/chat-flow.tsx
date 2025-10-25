@@ -338,6 +338,7 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
         onConnect={onConnect}
         onConnectStart={onConnectStart}
         onConnectEnd={onConnectEnd}
+        colorMode={mounted ? currentTheme : "light"}
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{
@@ -383,8 +384,6 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
           className="rounded-md border bg-background/80 shadow-lg backdrop-blur-sm"
           pannable
           zoomable
-          bgColor={mounted ? (currentTheme === 'dark' ? '#1a1a1a' : '#ffffff') : '#ffffff'}
-          maskColor={mounted ? (currentTheme === 'dark' ? '#2a2a2a' : '#ebe8e8') : '#ebe8e8'}
           nodeColor={(node) => {
             if (node.type === 'conversationNode') return '#a855f7';
             if (node.type === 'promptNode') return '#22c55e';
