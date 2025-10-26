@@ -3,9 +3,25 @@
 import { memo, useState, useRef, useEffect } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { motion } from 'framer-motion';
-import { Send, X } from 'lucide-react';
+import { Send, X, ChevronDown, Brain, Sparkles } from 'lucide-react';
 import type { UseChatHelpers } from '@ai-sdk/react';
 import type { ChatMessage } from '@/lib/types';
+import { chatModels, DEFAULT_CHAT_MODEL } from '@/lib/ai/models';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 export type PromptNodeData = {
   sendMessage: UseChatHelpers<ChatMessage>['sendMessage'];
@@ -17,13 +33,31 @@ export type PromptNodeData = {
   creatorColor?: string;
   isBeingTyped?: boolean;
   typedBy?: string;
+  selectedModel?: string;
+  onModelChange?: (modelId: string) => void;
+  memoryEnabled?: boolean;
+  onMemoryToggle?: (enabled: boolean) => void;
 };
 
 export const PromptNode = memo((props: NodeProps) => {
   const { id, selected } = props;
   const data = props.data as PromptNodeData;
-  const { sendMessage, status, onCancel, creatorName, creatorColor, isBeingTyped, typedBy } = data;
+  const {
+    sendMessage,
+    status,
+    onCancel,
+    creatorName,
+    creatorColor,
+    isBeingTyped,
+    typedBy,
+    selectedModel = DEFAULT_CHAT_MODEL,
+    onModelChange,
+    memoryEnabled = false,
+    onMemoryToggle
+  } = data;
   const [input, setInput] = useState('');
+  const [currentModel, setCurrentModel] = useState(selectedModel);
+  const [isMemoryEnabled, setIsMemoryEnabled] = useState(memoryEnabled);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isDisabled = status === 'streaming' || status === 'submitted';
   const [hoveredHandle, setHoveredHandle] = useState<string | null>(null);
@@ -50,6 +84,16 @@ export const PromptNode = memo((props: NodeProps) => {
     }
   }, [input]);
 
+  const handleModelChange = (modelId: string) => {
+    setCurrentModel(modelId);
+    onModelChange?.(modelId);
+  };
+
+  const handleMemoryToggle = (enabled: boolean) => {
+    setIsMemoryEnabled(enabled);
+    onMemoryToggle?.(enabled);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isDisabled) return;
@@ -58,13 +102,15 @@ export const PromptNode = memo((props: NodeProps) => {
       return;
     }
 
-    console.log('📤 Submitting prompt from node:', id, 'with text:', input);
+    console.log('📤 Submitting prompt from node:', id, 'with text:', input, 'using model:', currentModel, 'memory:', isMemoryEnabled);
 
-    // Send the message
+    // Send the message with the selected model and memory settings
     sendMessage({
       role: 'user',
       parts: [{ type: 'text', text: input }],
-    });
+      model: currentModel,
+      memoryEnabled: isMemoryEnabled,
+    } as any);
 
     // Clear input immediately for better UX
     setInput('');
@@ -204,6 +250,71 @@ export const PromptNode = memo((props: NodeProps) => {
 
         {/* Input Form */}
         <form onSubmit={handleSubmit} className="p-3">
+          {/* Model Selector and Memory Toggle */}
+          <div className="mb-2 space-y-2">
+            <Select
+              value={currentModel}
+              onValueChange={handleModelChange}
+              disabled={isDisabled}
+            >
+              <SelectTrigger className="w-full h-8 text-xs border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+                <SelectValue placeholder="Select a model" />
+              </SelectTrigger>
+              <SelectContent className="z-[9999]">
+                {chatModels.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    <div className="flex flex-col">
+                      <span className="font-medium">{model.name}</span>
+                      {model.provider && (
+                        <span className="text-[10px] text-muted-foreground">
+                          {model.provider === 'anthropic' ? 'Anthropic' : 'Google'}
+                        </span>
+                      )}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Memory Toggle */}
+            <div className="flex items-center justify-between p-2 rounded bg-gray-50 dark:bg-gray-900">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Label
+                      htmlFor={`memory-toggle-${id}`}
+                      className="text-xs flex items-center gap-2 cursor-pointer"
+                    >
+                      <Brain className="h-3 w-3 text-gray-500" />
+                      <span>Use Memory</span>
+                    </Label>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Enable to use memory system for context and learning</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <Switch
+                id={`memory-toggle-${id}`}
+                checked={isMemoryEnabled}
+                onCheckedChange={handleMemoryToggle}
+                disabled={isDisabled}
+                className="scale-75"
+              />
+            </div>
+
+            {/* Reasoning Indicator */}
+            {currentModel === 'chat-model-reasoning' && (
+              <div className="px-2 py-1 rounded bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800/50">
+                <div className="flex items-center gap-1.5 text-[10px] text-purple-600 dark:text-purple-400">
+                  <Sparkles className="h-3 w-3" />
+                  <span className="font-medium">Reasoning Mode Active</span>
+                  <span className="text-[9px] opacity-70">• Shows chain of thought</span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <textarea
             ref={textareaRef}
             value={input}
@@ -216,7 +327,10 @@ export const PromptNode = memo((props: NodeProps) => {
             style={{ maxHeight: '200px', minHeight: '60px' }}
           />
 
-          <div className="mt-2 flex items-center justify-end">
+          <div className="mt-2 flex items-center justify-between">
+            <div className="text-[10px] text-gray-400">
+              {chatModels.find(m => m.id === currentModel)?.name || 'Unknown Model'}
+            </div>
             <button
               type="submit"
               disabled={isDisabled || !input.trim()}

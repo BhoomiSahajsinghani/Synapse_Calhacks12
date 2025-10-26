@@ -4,6 +4,7 @@
     "": {
       "name": "ai-chatbot",
       "dependencies": {
+        "@ai-sdk/anthropic": "^2.0.37",
         "@ai-sdk/google": "^2.0.14",
         "@ai-sdk/openai": "^2.0.14",
         "@ai-sdk/provider": "2.0.0",

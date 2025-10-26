@@ -48,6 +48,7 @@ import {
   addMemoryTool,
   searchMemoriesTool,
 } from '@/lib/ai/tools/supermemory-tools';
+import { MemoryExtractor } from '@/lib/ai/memory-extractor';
 // import stockTool from '@/lib/ai/tools/getStock'; // temporarily disabled
 
 export const maxDuration = 60;
@@ -184,6 +185,7 @@ export async function POST(request: Request) {
 
     console.log('🔑 API: Environment check:');
     console.log('  - GOOGLE_GENERATIVE_AI_API_KEY:', process.env.GOOGLE_GENERATIVE_AI_API_KEY ? 'Set' : 'Not set');
+    console.log('  - ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY ? 'Set' : 'Not set');
     console.log('  - SUPERMEMORY_API_KEY:', process.env.SUPERMEMORY_API_KEY ? 'Set' : 'Not set');
 
     if (!process.env.SUPERMEMORY_API_KEY)
@@ -308,6 +310,38 @@ export async function POST(request: Request) {
             });
           } catch (err) {
             console.warn('Unable to persist last usage for chat', id, err);
+          }
+        }
+
+        // Automatically extract and save important memories (only for non-guest users with memory enabled)
+        if (
+          userType !== 'guest' &&
+          process.env.SUPERMEMORY_API_KEY &&
+          message.memoryEnabled !== false
+        ) {
+          try {
+            // Get the assistant's response
+            const assistantMessage = messages[messages.length - 1];
+            if (assistantMessage && assistantMessage.role === 'assistant') {
+              console.log('🧠 Extracting memories from conversation...');
+
+              const memoryExtractor = new MemoryExtractor(
+                process.env.SUPERMEMORY_API_KEY,
+                session.user.id
+              );
+
+              const result = await memoryExtractor.processConversation(
+                message,
+                assistantMessage
+              );
+
+              if (result.saved > 0) {
+                console.log(`✅ Automatically saved ${result.saved} important memories`);
+              }
+            }
+          } catch (error) {
+            console.error('Failed to extract memories:', error);
+            // Don't fail the request if memory extraction fails
           }
         }
       },

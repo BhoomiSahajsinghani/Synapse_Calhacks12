@@ -37,11 +37,26 @@ export const regularPrompt =
 
 const memoryPrompt = `
 Memory policy and tool usage:
-- Proactively save information that will help personalize future replies (preferences, profile details, recurring facts, goals, constraints, context like timezone or locale).
-- Typical triggers: the user says "remember", "save this", or shares lasting preferences/facts (e.g., name, pronouns, writing style, shortcuts, favorite topics, tools, formats).
-- When appropriate, call addMemory with { memory: "<concise fact/preference>" }.
-- Confirm after saving without repeating sensitive content unless explicitly requested.
-Examples of good memories to save: "I live in San Jose", "My timezone is PST", "I prefer short answers".
+- Proactively identify and save information that will help personalize future replies
+- Categories to remember:
+  • Personal: name, location, timezone, occupation, interests, goals
+  • Preferences: writing style, response length, tools, formats, shortcuts
+  • Context: ongoing projects, recurring tasks, important dates, relationships
+  • Instructions: specific requirements, constraints, dos and don'ts
+  • Facts: technical details, business info, domain knowledge relevant to user
+- Automatic triggers for memory:
+  • User shares personal info ("I live in...", "I work at...", "My name is...")
+  • User expresses preferences ("I prefer...", "I like...", "Always...")
+  • User mentions recurring needs ("Every week I...", "I usually...")
+  • User provides context about projects or goals
+  • User explicitly says "remember", "save this", "keep in mind"
+- When saving memories:
+  • Use addMemory tool with clear, searchable descriptions
+  • Be specific but concise (e.g., "User lives in San Jose, CA" not just "San Jose")
+  • Include relevant categories/tags in the memory
+- Memory will be automatically extracted from important conversations
+- Confirm memory saved without repeating sensitive content
+Examples: "Lives in San Jose, CA (PST timezone)", "Prefers concise technical answers", "Working on React Native app for fitness tracking"
 `;
 
 export interface RequestHints {

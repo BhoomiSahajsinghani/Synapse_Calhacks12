@@ -75,6 +75,10 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
     [messages, status]
   );
 
+  // Track selected model and memory settings for new prompts
+  const [selectedModel, setSelectedModel] = useState<string>('chat-model');
+  const [memoryEnabled, setMemoryEnabled] = useState<boolean>(false);
+
   const [connectingNodeId, setConnectingNodeId] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [showPresence, setShowPresence] = useState(true);
@@ -545,6 +549,10 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
         creatorId: stableUserId,
         creatorName: userName,
         creatorColor: userColor,
+        selectedModel,
+        onModelChange: setSelectedModel,
+        memoryEnabled,
+        onMemoryToggle: setMemoryEnabled,
         onCancel: () => {
           setNodesLocal((nds: any) => nds.filter((n: any) => n.id !== id));
           setEdgesLocal((eds: any) =>
@@ -614,7 +622,7 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
 
     // Don't save prompt nodes to database - wait until they become answer nodes
     // This prevents the issue where prompt nodes are saved and then loaded back as prompt nodes
-  }, [wrappedSendMessage, status, setNodesLocal, setEdgesLocal, isFlowStorageLoaded, addNode, addEdge, deleteNode, stableUserId, userName, userColor, presenceColor]);
+  }, [wrappedSendMessage, status, setNodesLocal, setEdgesLocal, isFlowStorageLoaded, addNode, addEdge, deleteNode, stableUserId, userName, userColor, presenceColor, selectedModel, setSelectedModel, memoryEnabled, setMemoryEnabled]);
 
   // Add required functions to nodes that come from Liveblocks
   // This effect must be after handleAddNewNodeFromAnswer is defined
@@ -1061,6 +1069,15 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
           setNodesLocal((currentNodes: any) => {
             const updatedNodes = currentNodes.map((n: any) => {
               if (n.id === availablePromptNode.id) {
+                // Get the selected model and memory settings from the prompt node or message
+                const promptNodeModel = n.data?.selectedModel;
+                const messageModel = (message as any).model;
+                const modelUsed = messageModel || promptNodeModel || selectedModel || 'chat-model';
+
+                const promptNodeMemory = n.data?.memoryEnabled;
+                const messageMemory = (message as any).memoryEnabled;
+                const memoryUsed = messageMemory !== undefined ? messageMemory : (promptNodeMemory !== undefined ? promptNodeMemory : memoryEnabled);
+
                 return {
                   ...n,
                   type: 'answerNode',
@@ -1073,6 +1090,8 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
                     creatorName: userName,
                     creatorColor: userColor,
                     isStorageReady: isFlowStorageLoaded,
+                    modelUsed,
+                    memoryUsed,
                   } as AnswerNodeData,
                 };
               }
@@ -1173,6 +1192,37 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
               if (n.type === 'answerNode') {
                 const nodeData = n.data as AnswerNodeData;
                 if (nodeData.userMessage?.id === userMessage.id) {
+                  // Extract reasoning from message for any model that provides it
+                  let reasoning: string | undefined;
+                  const modelUsed = nodeData.modelUsed;
+
+                  // Check for reasoning in message parts (works for all models that support reasoning tags)
+                  if (message.parts) {
+                    const textPart = message.parts.find((part: any) => part.type === 'text') as any;
+                    if (textPart?.text) {
+                      // Extract content between <think> tags (Gemini reasoning model)
+                      const thinkMatch = textPart.text.match(/<think>([\s\S]*?)<\/think>/);
+                      if (thinkMatch) {
+                        reasoning = thinkMatch[1].trim();
+                        // Remove the reasoning from the displayed text
+                        textPart.text = textPart.text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+                      }
+
+                      // Also check for <thinking> tags (Claude models with reasoning)
+                      const thinkingMatch = textPart.text.match(/<thinking>([\s\S]*?)<\/thinking>/);
+                      if (thinkingMatch) {
+                        reasoning = thinkingMatch[1].trim();
+                        // Remove the reasoning from the displayed text
+                        textPart.text = textPart.text.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+                      }
+                    }
+                  }
+
+                  // Check for experimental_providerData which may contain reasoning
+                  if (!reasoning && (message as any).experimental_providerData?.reasoning) {
+                    reasoning = (message as any).experimental_providerData.reasoning;
+                  }
+
                   return {
                     ...n,
                     data: {
@@ -1181,6 +1231,7 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
                       isLoading: false,
                       onAddNewNode: nodeData.onAddNewNode || handleAddNewNodeFromAnswer,
                       isStorageReady: isFlowStorageLoaded,
+                      reasoning,
                     },
                   };
                 }
