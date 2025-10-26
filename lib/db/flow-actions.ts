@@ -39,7 +39,7 @@ export async function saveFlowData({
   try {
     // Convert nodes to database format
     const dbNodes = nodes
-      .filter((node) => node.type === 'conversationNode' || node.type === 'promptNode')
+      .filter((node) => node.type === 'conversationNode' || node.type === 'promptNode' || node.type === 'answerNode')
       .map((node) => ({
         id: node.id,
         type: node.type || 'default',
