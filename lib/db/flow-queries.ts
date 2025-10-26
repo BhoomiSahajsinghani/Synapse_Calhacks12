@@ -91,19 +91,23 @@ export async function saveFlowNodes({
       updatedAt: new Date(),
     }));
 
-    return await db
-      .insert(flowNode)
-      .values(values)
-      .onConflictDoUpdate({
-        target: flowNode.id,
-        set: {
-          positionX: values[0].positionX,
-          positionY: values[0].positionY,
-          data: values[0].data,
-          parentNodeId: values[0].parentNodeId,
-          updatedAt: new Date(),
-        },
-      });
+    // Insert nodes one by one to handle conflicts properly
+    for (const value of values) {
+      await db
+        .insert(flowNode)
+        .values(value)
+        .onConflictDoUpdate({
+          target: flowNode.id,
+          set: {
+            positionX: value.positionX,
+            positionY: value.positionY,
+            data: value.data,
+            parentNodeId: value.parentNodeId,
+            updatedAt: new Date(),
+          },
+        });
+    }
+    return;
   } catch (error: any) {
     // If it's a foreign key constraint error (chat doesn't exist), don't throw
     if (error?.code === '23503') {
@@ -276,19 +280,23 @@ export async function saveFlowEdges({
       createdAt: new Date(),
     }));
 
-    return await db
-      .insert(flowEdge)
-      .values(values)
-      .onConflictDoUpdate({
-        target: flowEdge.id,
-        set: {
-          source: values[0].source,
-          target: values[0].target,
-          type: values[0].type,
-          animated: values[0].animated,
-          style: values[0].style,
-        },
-      });
+    // Insert edges one by one to handle conflicts properly
+    for (const value of values) {
+      await db
+        .insert(flowEdge)
+        .values(value)
+        .onConflictDoUpdate({
+          target: flowEdge.id,
+          set: {
+            source: value.source,
+            target: value.target,
+            type: value.type,
+            animated: value.animated,
+            style: value.style,
+          },
+        });
+    }
+    return;
   } catch (error: any) {
     // If it's a foreign key constraint error (chat doesn't exist), don't throw
     if (error?.code === '23503') {

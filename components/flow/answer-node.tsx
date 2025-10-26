@@ -15,12 +15,26 @@ export type AnswerNodeData = {
   assistantMessage?: ChatMessage;
   isLoading?: boolean;
   onAddNewNode?: (parentId: string) => void;
+  creatorId?: string;
+  creatorName?: string;
+  creatorColor?: string;
+  isBeingEdited?: boolean;
+  editedBy?: string;
 };
 
 export const AnswerNode = memo((props: NodeProps) => {
-  const { id } = props;
+  const { id, selected } = props;
   const data = props.data as AnswerNodeData;
-  const { userMessage, assistantMessage, isLoading, onAddNewNode } = data;
+  const {
+    userMessage,
+    assistantMessage,
+    isLoading,
+    onAddNewNode,
+    creatorName,
+    creatorColor,
+    isBeingEdited,
+    editedBy
+  } = data;
   const [isResponseExpanded, setIsResponseExpanded] = useState(true);
   const [showSkeleton, setShowSkeleton] = useState(isLoading);
 
@@ -50,114 +64,144 @@ export const AnswerNode = memo((props: NodeProps) => {
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.4, ease: 'easeOut' }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
       className="group/answer relative"
     >
+      {/* Top Handle */}
       <Handle
         type="target"
         position={Position.Top}
-        className="!h-3 !w-3 !border-2 !border-purple-500 !bg-purple-500/20"
+        className="!h-2 !w-2 !border !border-gray-300 !bg-white dark:!border-gray-600 dark:!bg-gray-800"
+        id="top"
+      />
+      <Handle
+        type="source"
+        position={Position.Top}
+        className="!h-2 !w-2 !border !border-gray-300 !bg-white dark:!border-gray-600 dark:!bg-gray-800 !left-[55%]"
+        id="top-source"
       />
 
-      <div className="min-w-[500px] max-w-[700px] overflow-hidden rounded-xl border border-border bg-background shadow-lg transition-shadow hover:shadow-xl">
-        {/* User Prompt Section */}
-        <div className='border-border border-b bg-gradient-to-br from-amber-50/50 to-orange-50/50 p-4 dark:from-amber-950/20 dark:to-orange-950/20'>
-          <div className="flex items-start gap-3">
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-600 text-white shadow-sm">
-              <User size={16} />
+      {/* Left Handle */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!h-2 !w-2 !border !border-gray-300 !bg-white dark:!border-gray-600 dark:!bg-gray-800"
+        id="left"
+      />
+      <Handle
+        type="source"
+        position={Position.Left}
+        className="!h-2 !w-2 !border !border-gray-300 !bg-white dark:!border-gray-600 dark:!bg-gray-800 !top-[55%]"
+        id="left-source"
+      />
+
+      {/* Right Handle */}
+      <Handle
+        type="target"
+        position={Position.Right}
+        className="!h-2 !w-2 !border !border-gray-300 !bg-white dark:!border-gray-600 dark:!bg-gray-800 !top-[45%]"
+        id="right"
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!h-2 !w-2 !border !border-gray-300 !bg-white dark:!border-gray-600 dark:!bg-gray-800"
+        id="right-source"
+      />
+
+      <div
+        className={`w-[500px] overflow-hidden rounded-lg bg-white shadow-sm dark:bg-gray-900 transition-all duration-200 ${
+          selected ? 'ring-2' : 'border'
+        } ${isBeingEdited ? 'ring-2 ring-orange-400 animate-pulse' : ''}`}
+        style={{
+          borderColor: selected ? creatorColor || '#6b7280' : '#e5e7eb',
+          ringColor: selected ? creatorColor || '#6b7280' : undefined,
+        }}
+      >
+        {/* Creator Indicator */}
+        {creatorName && (
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 text-xs"
+            style={{ backgroundColor: `${creatorColor}20` }}
+          >
+            <div
+              className="flex h-5 w-5 items-center justify-center rounded-full text-white text-[10px] font-medium"
+              style={{ backgroundColor: creatorColor || '#6b7280' }}
+            >
+              {creatorName.charAt(0).toUpperCase()}
             </div>
-            <div className="flex-1">
-              <div className="mb-1.5 font-semibold text-amber-900 text-xs uppercase tracking-wide dark:text-amber-300">
-                Prompt
-              </div>
-              <MessageContent className="break-words text-foreground text-sm leading-relaxed">
-                <Response>
-                  {sanitizeText(userTextPart?.type === 'text' ? userTextPart.text : '')}
-                </Response>
-              </MessageContent>
-            </div>
+            <span className="text-gray-600 dark:text-gray-400">
+              {creatorName}
+              {isBeingEdited && editedBy && editedBy !== creatorName && (
+                <span className="ml-2 text-orange-600 dark:text-orange-400">
+                  (editing: {editedBy})
+                </span>
+              )}
+            </span>
+          </div>
+        )}
+
+        {/* User Prompt Section - minimal */}
+        <div className='border-b border-gray-100 p-3 dark:border-gray-800'>
+          <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">
+            Prompt
+          </div>
+          <div className="text-sm text-gray-700 dark:text-gray-300">
+            {sanitizeText(userTextPart?.type === 'text' ? userTextPart.text : '')}
           </div>
         </div>
 
-        {/* Assistant Response Section with Skeleton */}
-        <div className="bg-gradient-to-br from-blue-50/30 to-purple-50/30 dark:from-blue-950/10 dark:to-purple-950/10">
-          {/* Response Header - Always visible */}
-          <button
-            onClick={toggleResponse}
-            className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-blue-100/50 dark:hover:bg-blue-900/20"
-            type="button"
-            disabled={showSkeleton}
-          >
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 text-white shadow-sm">
-              <SparklesIcon size={16} />
-            </div>
-            <div className="flex-1">
-              <div className="font-semibold text-blue-900 text-xs uppercase tracking-wide dark:text-blue-300">
-                Response
-              </div>
-              {!isResponseExpanded && hasAssistantContent && !showSkeleton && (
-                <div className="mt-1 truncate text-muted-foreground text-xs">
-                  {sanitizeText(assistantTextPart?.type === 'text' ? `${assistantTextPart.text.substring(0, 60)}...` : '')}
-                </div>
-              )}
-            </div>
-            {!showSkeleton && (
-              <div className="shrink-0 text-blue-900 dark:text-blue-300">
+        {/* Assistant Response Section - minimal */}
+        <div className="p-3">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              Response
+            </span>
+            {!showSkeleton && hasAssistantContent && (
+              <button
+                onClick={toggleResponse}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                type="button"
+              >
                 {isResponseExpanded ? (
-                  <ChevronUp size={20} className="transition-transform" />
+                  <ChevronUp size={14} />
                 ) : (
-                  <ChevronDown size={20} className="transition-transform" />
+                  <ChevronDown size={14} />
                 )}
-              </div>
+              </button>
             )}
-          </button>
+          </div>
 
-          {/* Collapsible Response Content */}
+          {/* Response Content */}
           <AnimatePresence mode="wait">
             {isResponseExpanded && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.3, ease: 'easeInOut' }}
+                transition={{ duration: 0.2 }}
                 className="overflow-hidden"
               >
-                <div className='border-blue-200/50 border-t px-4 pt-3 pb-4 dark:border-blue-800/30'>
+                <div className='pt-1'>
                   {showSkeleton ? (
-                    <motion.div
-                      key="skeleton"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="space-y-2.5"
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className="h-2 w-2 animate-bounce rounded-full bg-blue-500" style={{ animationDelay: '0ms' }} />
-                        <div className="h-2 w-2 animate-bounce rounded-full bg-purple-500" style={{ animationDelay: '150ms' }} />
-                        <div className="h-2 w-2 animate-bounce rounded-full bg-indigo-500" style={{ animationDelay: '300ms' }} />
-                        <span className="ml-2 text-muted-foreground text-xs">Thinking...</span>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-1">
+                        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400" />
+                        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400" style={{ animationDelay: '150ms' }} />
+                        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400" style={{ animationDelay: '300ms' }} />
                       </div>
-                      <div className="space-y-2">
-                        <div className="h-3 w-full animate-pulse rounded bg-muted/60" />
-                        <div className="h-3 w-5/6 animate-pulse rounded bg-muted/60" style={{ animationDelay: '100ms' }} />
-                        <div className="h-3 w-4/6 animate-pulse rounded bg-muted/60" style={{ animationDelay: '200ms' }} />
+                      <div className="space-y-1">
+                        <div className="h-2 w-full animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+                        <div className="h-2 w-5/6 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+                        <div className="h-2 w-4/6 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
                       </div>
-                    </motion.div>
+                    </div>
                   ) : assistantMessage ? (
-                    <motion.div
-                      key="content"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                    >
-                      <MessageContent className="break-words text-foreground text-sm leading-relaxed">
-                        <Response>
-                          {sanitizeText(assistantTextPart?.type === 'text' ? assistantTextPart.text : '')}
-                        </Response>
-                      </MessageContent>
-                    </motion.div>
+                    <div className="text-sm text-gray-700 dark:text-gray-300">
+                      {sanitizeText(assistantTextPart?.type === 'text' ? assistantTextPart.text : '')}
+                    </div>
                   ) : (
-                    <div className="text-muted-foreground text-sm italic">
+                    <div className="text-sm text-gray-400 dark:text-gray-500 italic">
                       Waiting for response...
                     </div>
                   )}
@@ -167,30 +211,38 @@ export const AnswerNode = memo((props: NodeProps) => {
           </AnimatePresence>
         </div>
 
-        {/* New Node Button - Shows after response is complete */}
+        {/* New Node Button - minimal */}
         {!showSkeleton && assistantMessage && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            transition={{ delay: 0.3, duration: 0.3 }}
-            className="border-border border-t bg-gradient-to-br from-green-50/30 to-emerald-50/30 p-3 dark:from-green-950/10 dark:to-emerald-950/10"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+            className="border-t border-gray-100 p-2 dark:border-gray-800"
           >
             <button
               onClick={handleAddNewNode}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-green-500/50 bg-green-50/50 px-4 py-2.5 font-medium text-green-700 text-sm transition-all hover:border-green-500 hover:bg-green-100/50 dark:bg-green-950/20 dark:text-green-300 dark:hover:bg-green-950/40"
+              className="flex w-full items-center justify-center gap-1 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
               type="button"
             >
-              <Plus size={18} />
+              <Plus size={14} />
               Add Follow-up
             </button>
           </motion.div>
         )}
       </div>
 
+      {/* Bottom Handle */}
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!h-3 !w-3 !border-2 !border-purple-500 !bg-purple-500/20"
+        className="!h-2 !w-2 !border !border-gray-300 !bg-white dark:!border-gray-600 dark:!bg-gray-800"
+        id="bottom"
+      />
+      <Handle
+        type="target"
+        position={Position.Bottom}
+        className="!h-2 !w-2 !border !border-gray-300 !bg-white dark:!border-gray-600 dark:!bg-gray-800 !left-[45%]"
+        id="bottom-target"
       />
     </motion.div>
   );

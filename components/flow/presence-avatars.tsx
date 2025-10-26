@@ -120,18 +120,18 @@ export function PresenceAvatars({
     if (self?.presence?.user) {
       users.push({
         ...self.presence.user,
-        connectionId: 'self',
+        connectionId: self.connectionId ? `self-${self.connectionId}` : `self-${Math.random().toString(36).substring(7)}`,
         isTyping: self.presence.isTyping,
         isSelf: true,
       });
     }
 
     // Add others
-    others.forEach((other) => {
+    others.forEach((other, index) => {
       if (other.presence?.user) {
         users.push({
           ...other.presence.user,
-          connectionId: other.connectionId.toString(),
+          connectionId: other.connectionId ? other.connectionId.toString() : `other-${index}-${Math.random().toString(36).substring(7)}`,
           isTyping: other.presence.isTyping,
           isSelf: false,
         });
@@ -156,7 +156,7 @@ export function PresenceAvatars({
         <AnimatePresence mode="popLayout">
           {visibleUsers.map((user) => (
             <Avatar
-              key={user.id}
+              key={user.connectionId}
               name={user.name}
               avatar={user.avatar}
               color={user.color}

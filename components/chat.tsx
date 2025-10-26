@@ -79,6 +79,12 @@ export function Chat({
       api: '/api/chat',
       fetch: fetchWithErrorHandlers,
       prepareSendMessagesRequest({ messages, id, body }) {
+        console.log('🔧 Preparing request with:', {
+          id,
+          message: messages.at(-1),
+          selectedChatModel: currentModelIdRef.current,
+          selectedVisibilityType: visibilityType,
+        });
         return {
           body: {
             id,
@@ -91,13 +97,16 @@ export function Chat({
       },
     }),
     onData: (dataPart) => {
+      console.log('📊 Received data part:', dataPart);
       setDataStream((ds) => (ds ? [...ds, dataPart] : []));
       if (dataPart.type === 'data-usage') setUsage(dataPart.data);
     },
     onFinish: () => {
+      console.log('✅ Chat stream finished');
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     },
     onError: (error) => {
+      console.error('❌ Chat error:', error);
       if (error instanceof ChatSDKError) {
         toast({
           type: 'error',
@@ -106,6 +115,14 @@ export function Chat({
       }
     },
   });
+
+  // Debug: Log messages changes
+  useEffect(() => {
+    console.log('📝 Messages updated:', messages.length, 'messages');
+    messages.forEach((msg, i) => {
+      console.log(`  Message ${i}: ${msg.role} - ${msg.parts?.[0]?.text?.substring(0, 50)}...`);
+    });
+  }, [messages]);
 
   const searchParams = useSearchParams();
   const query = searchParams.get('query');

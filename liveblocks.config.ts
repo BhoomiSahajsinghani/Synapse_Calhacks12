@@ -28,6 +28,8 @@ export type LiveFlowEdge = {
   style?: any;
   chatId: string;
   createdAt: string;
+  creatorId?: string; // ID of the user who created this edge
+  creatorColor?: string; // Color assigned to the creator
 };
 
 // Message type for live synchronization

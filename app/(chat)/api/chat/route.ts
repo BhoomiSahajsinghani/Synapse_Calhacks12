@@ -91,12 +91,16 @@ export function getStreamContext() {
 }
 
 export async function POST(request: Request) {
+  console.log('🌐 API: Received POST request to /api/chat');
+
   let requestBody: PostRequestBody;
 
   try {
     const json = await request.json();
+    console.log('📦 API: Request body:', json);
     requestBody = postRequestBodySchema.parse(json);
-  } catch (_) {
+  } catch (error) {
+    console.error('❌ API: Failed to parse request body:', error);
     return new ChatSDKError('bad_request:api').toResponse();
   }
 
@@ -114,12 +118,15 @@ export async function POST(request: Request) {
     } = requestBody;
 
     const session = await auth();
+    console.log('👤 API: Session user:', session?.user?.id);
 
     if (!session?.user) {
+      console.error('❌ API: No user session');
       return new ChatSDKError('unauthorized:chat').toResponse();
     }
 
     const userType: UserType = session.user.type;
+    console.log('📋 API: User type:', userType);
 
     const messageCount = await getMessageCountByUserId({
       id: session.user.id,
@@ -175,6 +182,10 @@ export async function POST(request: Request) {
       ],
     });
 
+    console.log('🔑 API: Environment check:');
+    console.log('  - GOOGLE_GENERATIVE_AI_API_KEY:', process.env.GOOGLE_GENERATIVE_AI_API_KEY ? 'Set' : 'Not set');
+    console.log('  - SUPERMEMORY_API_KEY:', process.env.SUPERMEMORY_API_KEY ? 'Set' : 'Not set');
+
     if (!process.env.SUPERMEMORY_API_KEY)
       throw new Error('Supermemory API not found');
 
@@ -183,8 +194,11 @@ export async function POST(request: Request) {
 
     let finalMergedUsage: AppUsage | undefined;
 
+    console.log('🚀 API: Starting AI stream with model:', selectedChatModel);
+
     const stream = createUIMessageStream({
       execute: ({ writer: dataStream }) => {
+        console.log('🤖 API: Executing streamText...');
         const result = streamText({
           model: myProvider.languageModel(selectedChatModel),
           system: systemPrompt({ selectedChatModel, requestHints }),
