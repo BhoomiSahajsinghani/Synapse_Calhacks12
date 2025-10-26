@@ -18,7 +18,7 @@ export type MessageNodeData = {
 export const UserMessageNode = memo((props: NodeProps) => {
   const data = props.data as MessageNodeData;
   const { message } = data;
-  const textPart = message.parts.find((part) => part.type === 'text');
+  const textPart = message?.parts?.find((part) => part.type === 'text');
 
   return (
     <motion.div
@@ -65,7 +65,7 @@ export const AssistantMessageNode = memo(
   (props: NodeProps) => {
     const data = props.data as MessageNodeData;
     const { message, isLoading } = data;
-    const textPart = message.parts.find((part) => part.type === 'text');
+    const textPart = message?.parts?.find((part) => part.type === 'text');
     const hasContent = textPart?.type === 'text' && textPart.text;
 
     return (

@@ -38,11 +38,17 @@ export const PromptNode = memo((props: NodeProps) => {
     e.preventDefault();
     if (!input.trim() || isDisabled) return;
 
+    if (!sendMessage) {
+      return;
+    }
+
+    // Send the message
     sendMessage({
       role: 'user',
       parts: [{ type: 'text', text: input }],
     });
 
+    // Clear input immediately for better UX
     setInput('');
   };
 

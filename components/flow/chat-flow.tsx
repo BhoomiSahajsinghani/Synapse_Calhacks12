@@ -25,6 +25,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { ConversationNode, type ConversationNodeData } from './conversation-node';
 import { PromptNode, type PromptNodeData } from './prompt-node';
+import { AnswerNode, type AnswerNodeData } from './answer-node';
 import { messagesToNodesAndEdges } from './utils';
 import type { ChatMessage } from '@/lib/types';
 import type { UseChatHelpers } from '@ai-sdk/react';
@@ -48,7 +49,7 @@ import { PresenceAvatars } from './presence-avatars';
 import { CollaborationToolbar } from '@/components/collaboration-toolbar';
 
 // Union type for all possible node data types
-export type FlowNodeData = ConversationNodeData | PromptNodeData;
+export type FlowNodeData = ConversationNodeData | PromptNodeData | AnswerNodeData;
 
 // Properly typed flow node
 export type FlowNode = Node<FlowNodeData>;
@@ -65,6 +66,7 @@ interface ChatFlowProps {
 const nodeTypes = {
   conversationNode: ConversationNode as React.ComponentType<NodeProps>,
   promptNode: PromptNode as React.ComponentType<NodeProps>,
+  answerNode: AnswerNode as React.ComponentType<NodeProps>,
 };
 
 function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps) {
@@ -108,6 +110,9 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
   // Track synced message IDs to avoid duplicates
   const syncedMessageIds = useRef<Set<string>>(new Set());
 
+  // Track which user messages have already been transformed to answer nodes
+  const transformedUserMessages = useRef<Set<string>>(new Set());
+
   // Track previous message count to detect new messages
   const previousMessageLengthRef = useRef(messages.length);
 
@@ -124,7 +129,7 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
       newMessages.forEach(message => {
         if (!syncedMessageIds.current.has(message.id)) {
           // This is a new message that hasn't been synced yet
-          const textPart = message.parts.find(p => p.type === 'text');
+          const textPart = message?.parts?.find(p => p.type === 'text');
           if (textPart && textPart.type === 'text') {
             addLiveblocksMessage({
               id: message.id,
@@ -164,6 +169,19 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
   const [nodesLocal, setNodesLocal, onNodesChangeLocal] = useNodesState<FlowNode>(initialNodes as FlowNode[]);
   const [edgesLocal, setEdgesLocal, onEdgesChangeLocal] = useEdgesState(initialEdges);
 
+  // Store nodes and edges in refs for use in callbacks
+  const nodesLocalRef = useRef(nodesLocal);
+  const edgesLocalRef = useRef(edgesLocal);
+
+  // Keep refs updated
+  useEffect(() => {
+    nodesLocalRef.current = nodesLocal;
+  }, [nodesLocal]);
+
+  useEffect(() => {
+    edgesLocalRef.current = edgesLocal;
+  }, [edgesLocal]);
+
   // Track if we're currently receiving updates from Liveblocks
   const isReceivingUpdatesRef = useRef(false);
   // Track which nodes we're currently dragging
@@ -171,34 +189,74 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
 
   // Stable callbacks for Liveblocks updates
   const handleNodesChangeFromLiveblocks = useCallback((newNodes: Node[]) => {
+    // Don't overwrite with empty nodes if we have local nodes
+    if (newNodes.length === 0 && nodesLocalRef.current.length > 0) {
+      return;
+    }
+
+    // Don't update if we have more nodes locally (likely just added one)
+    if (nodesLocalRef.current.length > newNodes.length) {
+      return;
+    }
+
     // Prevent syncing back only during the update
     isReceivingUpdatesRef.current = true;
 
-    // Filter out updates for nodes we're currently dragging
-    const filteredNodes = newNodes.map(newNode => {
+    // Create a map of incoming nodes for efficient lookup
+    const newNodesMap = new Map(newNodes.map(n => [n.id, n]));
+
+    // Merge with local nodes - preserve local nodes not in the update
+    const mergedNodes = nodesLocalRef.current.map(localNode => {
       // If we're dragging this node locally, keep our local version
-      if (draggingNodesRef.current.has(newNode.id)) {
-        const localNode = nodesLocal.find(n => n.id === newNode.id);
-        return localNode || newNode;
+      if (draggingNodesRef.current.has(localNode.id)) {
+        return localNode;
       }
-      return newNode;
+      // Use updated version if it exists, otherwise keep local
+      return newNodesMap.get(localNode.id) || localNode;
     });
 
-    // Update local state when nodes change from other users
-    setNodesLocal(filteredNodes as FlowNode[]);
+    // Add any new nodes from Liveblocks that we don't have locally
+    newNodes.forEach(newNode => {
+      if (!mergedNodes.find(n => n.id === newNode.id)) {
+        mergedNodes.push(newNode);
+      }
+    });
+
+    // Update local state with merged nodes
+    setNodesLocal(mergedNodes as FlowNode[]);
 
     // Reset flag immediately using microtask for better performance
     Promise.resolve().then(() => {
       isReceivingUpdatesRef.current = false;
     });
-  }, [setNodesLocal, nodesLocal]);
+  }, [setNodesLocal]);
 
   const handleEdgesChangeFromLiveblocks = useCallback((newEdges: Edge[]) => {
+    // Don't overwrite if we have more edges locally (likely just added one)
+    if (edgesLocalRef.current.length > newEdges.length) {
+      return;
+    }
+
     // Prevent syncing back only during the update
     isReceivingUpdatesRef.current = true;
 
-    // Update local state when edges change from other users
-    setEdgesLocal(newEdges);
+    // Create a map of incoming edges for efficient lookup
+    const newEdgesMap = new Map(newEdges.map(e => [e.id, e]));
+
+    // Merge with local edges - preserve local edges not in the update
+    const mergedEdges = edgesLocalRef.current.map(localEdge => {
+      return newEdgesMap.get(localEdge.id) || localEdge;
+    });
+
+    // Add any new edges from Liveblocks that we don't have locally
+    newEdges.forEach(newEdge => {
+      if (!mergedEdges.find(e => e.id === newEdge.id)) {
+        mergedEdges.push(newEdge);
+      }
+    });
+
+    // Update local state with merged edges
+    setEdgesLocal(mergedEdges);
 
     // Reset flag immediately using microtask
     Promise.resolve().then(() => {
@@ -300,13 +358,94 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
     userName: 'User', // TODO: Get actual user name
   });
 
+  // Handler for creating new prompt nodes from answer nodes
+  const handleAddNewNodeFromAnswer = useCallback((parentId: string) => {
+    // Ensure sendMessage is available
+    if (!sendMessage) {
+      return;
+    }
+
+    const id = `prompt-${Date.now()}`;
+
+    // Get parent node from current nodes
+    const parentNode = nodesLocalRef.current.find((n: any) => n.id === parentId);
+    if (!parentNode) {
+      return;
+    }
+
+    // Position new node below the parent
+    const position = {
+      x: parentNode.position.x,
+      y: parentNode.position.y + 280,
+    };
+
+    // Save this position
+    nodePositionsRef.current.set(id, position);
+
+    const newNode = {
+      id,
+      type: 'promptNode' as const,
+      position,
+      data: {
+        sendMessage,
+        status,
+        parentNodeId: parentId,
+        onCancel: () => {
+          setNodesLocal((nds: any) => nds.filter((n: any) => n.id !== id));
+          setEdgesLocal((eds: any) =>
+            eds.filter((e: any) => e.source !== parentId || e.target !== id)
+          );
+          if (deleteNode) deleteNode(id);
+          nodePositionsRef.current.delete(id);
+        },
+      },
+      draggable: true,
+    };
+
+    // Add the new node - use spread to ensure React sees a new array
+    setNodesLocal((currentNodes: any) => [...currentNodes, newNode]);
+
+    // Create dashed edge connecting parent to new prompt
+    const newEdge = {
+      id: `edge-${parentId}-${id}`,
+      source: parentId,
+      target: id,
+      type: 'smoothstep',
+      style: {
+        stroke: '#10b981', // Green color for visibility
+        strokeWidth: 3, // Thicker for better visibility
+        strokeDasharray: '5,5',
+      },
+      animated: true,
+    };
+
+    setEdgesLocal((eds: any) => [...eds, newEdge]);
+
+
+    // Sync to Liveblocks immediately to prevent overwrite
+    if (isFlowStorageLoaded) {
+      // Add node and edge to Liveblocks storage
+      addNode(newNode);
+      addEdge(newEdge);
+    }
+  }, [sendMessage, status, setNodesLocal, setEdgesLocal, isFlowStorageLoaded, addNode, addEdge, deleteNode]);
+
+  // Track if we've loaded flow data from database
+  const hasLoadedFlowDataRef = useRef(false);
+
   // Load flow data from database on mount
   useEffect(() => {
+    // Don't initialize until sendMessage is available
+    if (!sendMessage || hasLoadedFlowDataRef.current) {
+      return;
+    }
+
     async function initializeFlow() {
+      hasLoadedFlowDataRef.current = true;
       const { nodes: savedNodes, edges: savedEdges } = await loadFlowData(chatId);
 
       if (savedNodes.length > 0) {
-        // Restore proper data properties for prompt nodes
+        // Restore proper data properties for prompt and answer nodes
         const restoredNodes: FlowNode[] = savedNodes.map(node => {
           if (node.type === 'promptNode') {
             return {
@@ -317,6 +456,15 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
                 status,
                 onCancel: (node.data as PromptNodeData).onCancel,
               } as PromptNodeData,
+            } as FlowNode;
+          } else if (node.type === 'answerNode') {
+            const answerData = node.data as AnswerNodeData;
+            return {
+              ...node,
+              data: {
+                ...answerData,
+                onAddNewNode: handleAddNewNodeFromAnswer,
+              } as AnswerNodeData,
             } as FlowNode;
           }
           return node as FlowNode;
@@ -334,13 +482,49 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
         restoredNodes.forEach(node => {
           nodePositionsRef.current.set(node.id, node.position);
         });
+
+        // Restore node-to-message mapping for answer nodes
+        restoredNodes.forEach(node => {
+          if (node.type === 'answerNode') {
+            const nodeData = node.data as AnswerNodeData;
+            if (nodeData.userMessage) {
+              nodeToMessageMap.current.set(node.id, nodeData.userMessage.id);
+              transformedUserMessages.current.add(nodeData.userMessage.id);
+            }
+          }
+        });
+
+        // Update last processed message count
+        lastProcessedMessageCount.current = messages.length;
+      } else {
+        // No saved nodes - add initial prompt node
+        const initialPromptNode = {
+          id: 'prompt-initial',
+          type: 'promptNode' as const,
+          position: { x: 400, y: 200 },
+          data: {
+            sendMessage,
+            status,
+          },
+          draggable: true,
+        };
+        setNodesLocal([initialPromptNode]);
+        setEdgesLocal([]);
+
+        // Also sync to Liveblocks to prevent it from clearing our node
+        if (isFlowStorageLoaded) {
+          addNode(initialPromptNode);
+        }
+
+        // Set last processed message count to current messages to avoid reprocessing
+        lastProcessedMessageCount.current = messages.length;
       }
 
       setIsInitialized(true);
     }
 
     initializeFlow();
-  }, [chatId, sendMessage, status, isFlowStorageLoaded, addNode, addEdge, setNodesLocal, setEdgesLocal]);
+  }, [chatId, sendMessage, status, isFlowStorageLoaded, addNode, addEdge, setNodesLocal, setEdgesLocal, messages.length]);
 
   // Debounced save to database
   const debouncedSave = useCallback(() => {
@@ -369,7 +553,7 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       nodesLocal.forEach(node => {
-        if (node.type === 'promptNode' || node.type === 'conversationNode') {
+        if (node.type === 'promptNode' || node.type === 'conversationNode' || node.type === 'answerNode') {
           nodePositionsRef.current.set(node.id, node.position);
         }
       });
@@ -378,180 +562,114 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
     return () => clearTimeout(timeoutId);
   }, [nodesLocal]);
 
-  // Store nodes in ref to avoid dependency issues
-  const nodesLocalRef = useRef(nodesLocal);
+
+
+  // Track which nodes are handling which messages
+  const nodeToMessageMap = useRef<Map<string, string>>(new Map());
+  const lastProcessedMessageCount = useRef(0);
+
+  // Handle message changes - only process NEW messages
   useEffect(() => {
-    nodesLocalRef.current = nodesLocal;
-  }, [nodesLocal]);
+    if (!isInitialized || !sendMessage) return;
 
-  // Update nodes and edges when messages change
-  useEffect(() => {
-    // Wait for initialization to complete before syncing messages
-    if (!isInitialized) return;
-
-    const { nodes: newNodes, edges: newEdges } = messagesToNodesAndEdges(
-      messages,
-      status
-    );
-
-    // If no messages, add an initial prompt node
-    if (newNodes.length === 0) {
-      // Check if we already have a prompt node
-      const hasPromptNode = nodesLocalRef.current.some(n => n.type === 'promptNode');
-      if (!hasPromptNode) {
-        const initialPromptNode = {
-          id: 'initial-prompt',
-          type: 'promptNode' as const,
-          position: { x: 300, y: 100 },
-          data: {
-            sendMessage,
-            status,
-          },
-          draggable: false,
-        };
-        setNodesLocal([initialPromptNode]);
-        setEdgesLocal([]);
-        // Also sync to Liveblocks (only if storage is loaded)
-        if (isFlowStorageLoaded) {
-          addNode(initialPromptNode);
-        }
-      }
-      previousMessageCountRef.current = 0;
-      return;
+    // If messages were cleared/reset, reset our tracking
+    if (messages.length < lastProcessedMessageCount.current) {
+      lastProcessedMessageCount.current = 0;
+      nodeToMessageMap.current.clear();
+      transformedUserMessages.current.clear();
     }
 
-    // Check if a new message was just added
-    const messageCountIncreased = messages.length > previousMessageCountRef.current;
+    // Only process new messages
+    if (messages.length <= lastProcessedMessageCount.current) return;
 
-    // Find any prompt nodes in current view
-    const currentPromptNodes = nodesLocalRef.current.filter(n => n.type === 'promptNode');
+    const newMessages = messages.slice(lastProcessedMessageCount.current);
 
-    // Only update if messages changed or we don't have the right conversation nodes
-    const currentConversationIds = nodesLocalRef.current.filter(n => n.type === 'conversationNode').map(n => n.id);
-    const newConversationIds = newNodes.map(n => n.id);
-    const needsUpdate = messageCountIncreased ||
-                        currentConversationIds.length !== newConversationIds.length ||
-                        !currentConversationIds.every(id => newConversationIds.includes(id));
+    // Double-check we have actual new messages
+    if (newMessages.length === 0) return;
 
-    if (!needsUpdate) {
-      previousMessageCountRef.current = messages.length;
-      return;
-    }
+    newMessages.forEach((message) => {
+      if (message.role === 'user') {
+        // Check if we've already processed this message
+        if (transformedUserMessages.current.has(message.id)) return;
 
-    previousMessageCountRef.current = messages.length;
+        // Find a prompt node that hasn't been assigned a message yet
+        // Important: Only look for prompt nodes that exist and aren't already handling a message
+        // This ensures new prompt nodes from "Add Follow-up" aren't matched with old messages
+        const promptNodes = nodesLocalRef.current.filter(n => n.type === 'promptNode');
 
-    // Apply saved positions to nodes
-    const nodesWithPositions = newNodes.map((newNode, index) => {
-      // First check if this exact node ID exists in saved positions
-      const savedPosition = nodePositionsRef.current.get(newNode.id);
-      if (savedPosition) {
-        return { ...newNode, position: savedPosition };
-      }
+        // Find unassigned prompt nodes
+        const unassignedPromptNodes = promptNodes.filter(node => {
+          // Check if this node is already handling a message
+          for (const [nodeId] of nodeToMessageMap.current) {
+            if (nodeId === node.id) return false;
+          }
+          return true;
+        });
 
-      // If this is a newly created conversation node and we just added a message
-      // Use the position of the first prompt node (which was just used to create this)
-      if (messageCountIncreased && newNode.type === 'conversationNode' && currentPromptNodes.length > 0) {
-        const lastConversationIndex = newNodes.filter(n => n.type === 'conversationNode').length - 1;
-        if (index === newNodes.findIndex(n => n.type === 'conversationNode' && newNodes.indexOf(n) === lastConversationIndex)) {
-          // This is the newest conversation node - use the prompt node's position
-          const promptPosition = currentPromptNodes[0].position;
-          nodePositionsRef.current.set(newNode.id, promptPosition);
-          return { ...newNode, position: promptPosition };
+        // Prefer the initial prompt node or the oldest unassigned one
+        const availablePromptNode = unassignedPromptNodes.find(n => n.id === 'prompt-initial') ||
+                                   unassignedPromptNodes[0];
+
+        if (availablePromptNode) {
+          // Mark as processed
+          transformedUserMessages.current.add(message.id);
+          nodeToMessageMap.current.set(availablePromptNode.id, message.id);
+
+          // Transform prompt node to answer node
+          setNodesLocal((currentNodes: any) => {
+            return currentNodes.map((n: any) => {
+              if (n.id === availablePromptNode.id) {
+                return {
+                  ...n,
+                  type: 'answerNode',
+                  data: {
+                    userMessage: message,
+                    assistantMessage: undefined,
+                    isLoading: true,
+                    onAddNewNode: handleAddNewNodeFromAnswer,
+                  } as AnswerNodeData,
+                };
+              }
+              return n;
+            });
+          });
+        }
+      } else if (message.role === 'assistant') {
+        // Find the user message this is responding to
+        const messageIndex = messages.indexOf(message);
+        const userMessageIndex = messageIndex - 1;
+
+        if (userMessageIndex >= 0 && messages[userMessageIndex]?.role === 'user') {
+          const userMessage = messages[userMessageIndex];
+
+          // Update the answer node with the assistant response
+          setNodesLocal((currentNodes: any) => {
+            return currentNodes.map((n: any) => {
+              if (n.type === 'answerNode') {
+                const nodeData = n.data as AnswerNodeData;
+                if (nodeData.userMessage?.id === userMessage.id) {
+                  return {
+                    ...n,
+                    data: {
+                      ...nodeData,
+                      assistantMessage: message,
+                      isLoading: false,
+                      onAddNewNode: nodeData.onAddNewNode || handleAddNewNodeFromAnswer,
+                    },
+                  };
+                }
+              }
+              return n;
+            });
+          });
         }
       }
-
-      return newNode;
     });
 
-    // If we just added a message, replace the prompt node with the conversation node
-    if (messageCountIncreased && currentPromptNodes.length > 0) {
-      const newestConversationNode = nodesWithPositions[nodesWithPositions.length - 1];
-      const submittedPromptNode = currentPromptNodes[0];
-      const parentNodeId = (submittedPromptNode.data as any)?.parentNodeId;
+    // Update the last processed count
+    lastProcessedMessageCount.current = messages.length;
 
-      // Remove the submitted prompt node from the list of nodes to keep
-      const remainingPromptNodes = currentPromptNodes.filter(n => n.id !== submittedPromptNode.id);
-
-      if (parentNodeId && newestConversationNode) {
-        // Has a parent - update edge from parent → prompt to parent → conversation
-        const parentToConversationEdge = {
-          id: `edge-${parentNodeId}-${newestConversationNode.id}`,
-          source: parentNodeId,
-          target: newestConversationNode.id,
-          type: 'smoothstep',
-          style: {
-            stroke: 'hsl(var(--primary))',
-            strokeWidth: 2,
-          },
-        };
-
-        setEdgesLocal((eds: any) => {
-          // Remove the edge from parent to prompt node
-          const filtered = eds.filter(
-            (e: any) => !(e.source === parentNodeId && e.target === submittedPromptNode.id)
-          );
-          return [...filtered, ...newEdges, parentToConversationEdge];
-        });
-      } else {
-        // No parent - just use the default edges from messagesToNodesAndEdges
-        setEdgesLocal(newEdges);
-      }
-
-      // Update nodes: conversation nodes + remaining prompt nodes (excluding submitted one)
-      const allNodes = [...nodesWithPositions, ...remainingPromptNodes];
-      setNodesLocal(allNodes);
-
-      // Sync new conversation nodes to Liveblocks (only if storage is loaded)
-      if (isFlowStorageLoaded) {
-        nodesWithPositions.forEach(node => {
-          // Only add if it's a new node (not already in Liveblocks)
-          const existingNode = nodes.find(n => n.id === node.id);
-          if (!existingNode) {
-            addNode(node);
-          }
-        });
-
-        // Also sync the edge updates to Liveblocks
-        if (parentNodeId && newestConversationNode) {
-          const parentToConversationEdge = {
-            id: `edge-${parentNodeId}-${newestConversationNode.id}`,
-            source: parentNodeId,
-            target: newestConversationNode.id,
-            type: 'smoothstep',
-          };
-          addEdge(parentToConversationEdge);
-
-          // Delete the old prompt node from Liveblocks
-          deleteNode(submittedPromptNode.id);
-        }
-      }
-
-      return;
-    }
-
-    // No new messages - keep all nodes as is
-    const promptNodesToKeep = nodesLocalRef.current.filter(n => n.type === 'promptNode');
-    const allNodes = [...nodesWithPositions, ...promptNodesToKeep];
-    setNodesLocal(allNodes);
-    setEdgesLocal(newEdges);
-
-    // Sync to Liveblocks if needed (only if storage is loaded)
-    if (isFlowStorageLoaded) {
-      nodesWithPositions.forEach(node => {
-        const existingNode = nodes.find(n => n.id === node.id);
-        if (!existingNode) {
-          addNode(node);
-        }
-      });
-
-      newEdges.forEach(edge => {
-        const existingEdge = edges.find(e => e.id === edge.id);
-        if (!existingEdge) {
-          addEdge(edge);
-        }
-      });
-    }
-  }, [messages, status, sendMessage, setNodesLocal, setEdgesLocal, isInitialized, isFlowStorageLoaded, addNode, addEdge, deleteNode, nodes, edges]);
+  }, [messages, isInitialized, sendMessage, setNodesLocal, handleAddNewNodeFromAnswer]);
 
   const onConnectStart: OnConnectStart = useCallback((_, { nodeId }) => {
     setConnectingNodeId(nodeId);
