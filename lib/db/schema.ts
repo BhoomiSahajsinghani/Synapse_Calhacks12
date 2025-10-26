@@ -182,8 +182,6 @@ export const flowNode = pgTable('FlowNode', {
   positionY: varchar('positionY', { length: 50 }).notNull(),
   data: jsonb('data').notNull(), // Node-specific data
   parentNodeId: varchar('parentNodeId', { length: 255 }), // For tracking parent-child relationships
-  userMessageId: uuid('userMessageId').references(() => message.id), // Links to user message
-  assistantMessageId: uuid('assistantMessageId').references(() => message.id), // Links to assistant message
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
 });
@@ -195,12 +193,8 @@ export const flowEdge = pgTable('FlowEdge', {
   chatId: uuid('chatId')
     .notNull()
     .references(() => chat.id, { onDelete: 'cascade' }),
-  source: varchar('source', { length: 255 })
-    .notNull()
-    .references(() => flowNode.id, { onDelete: 'cascade' }),
-  target: varchar('target', { length: 255 })
-    .notNull()
-    .references(() => flowNode.id, { onDelete: 'cascade' }),
+  source: varchar('source', { length: 255 }).notNull(), // Reference to node ID (no FK constraint)
+  target: varchar('target', { length: 255 }).notNull(), // Reference to node ID (no FK constraint)
   type: varchar('type', { length: 50 }).notNull().default('smoothstep'),
   animated: boolean('animated').notNull().default(false),
   style: jsonb('style'), // Edge styling (color, width, etc.)

@@ -8,20 +8,27 @@ import { Response } from '../elements/response';
 import { MessageContent } from '../elements/message';
 import { sanitizeText } from '@/lib/utils';
 import type { ChatMessage } from '@/lib/types';
-import { User, ChevronDown, ChevronUp } from 'lucide-react';
+import { User, ChevronDown, ChevronUp, Lock, Unlock } from 'lucide-react';
+import type { NodeLock } from '@/liveblocks.config';
+import { formatTimeRemaining } from '@/lib/realtime/lock-manager';
 
 export type ConversationNodeData = {
   userMessage: ChatMessage;
   assistantMessage?: ChatMessage;
   isLoading?: boolean;
+  lock?: NodeLock | null;
+  hasLock?: boolean;
+  onRequestLock?: () => void;
+  onReleaseLock?: () => void;
 };
 
-export const ConversationNode = memo(({ data }: NodeProps<ConversationNodeData>) => {
-  const { userMessage, assistantMessage, isLoading } = data;
+export const ConversationNode = memo((props: NodeProps) => {
+  const data = props.data as ConversationNodeData;
+  const { userMessage, assistantMessage, isLoading, lock, hasLock, onRequestLock, onReleaseLock } = data;
   const [isResponseExpanded, setIsResponseExpanded] = useState(true);
 
-  const userTextPart = userMessage.parts.find((part) => part.type === 'text');
-  const assistantTextPart = assistantMessage?.parts.find((part) => part.type === 'text');
+  const userTextPart = userMessage.parts.find((part: any) => part.type === 'text');
+  const assistantTextPart = assistantMessage?.parts.find((part: any) => part.type === 'text');
   const hasAssistantContent = assistantTextPart?.type === 'text' && assistantTextPart.text;
 
   const toggleResponse = () => {
@@ -43,7 +50,7 @@ export const ConversationNode = memo(({ data }: NodeProps<ConversationNodeData>)
 
       <div className="min-w-[500px] max-w-[700px] overflow-hidden rounded-xl border border-border bg-background shadow-lg transition-shadow hover:shadow-xl">
         {/* User Prompt Section */}
-        <div className="border-b border-border bg-gradient-to-br from-amber-50/50 to-orange-50/50 p-4 dark:from-amber-950/20 dark:to-orange-950/20">
+        <div className='border-border border-b bg-gradient-to-br from-amber-50/50 to-orange-50/50 p-4 dark:from-amber-950/20 dark:to-orange-950/20'>
           <div className="flex items-start gap-3">
             <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-600 text-white shadow-sm">
               <User size={16} />
@@ -78,7 +85,7 @@ export const ConversationNode = memo(({ data }: NodeProps<ConversationNodeData>)
               </div>
               {!isResponseExpanded && hasAssistantContent && (
                 <div className="mt-1 truncate text-muted-foreground text-xs">
-                  {sanitizeText(assistantTextPart?.type === 'text' ? assistantTextPart.text.substring(0, 60) + '...' : '')}
+                  {sanitizeText(assistantTextPart?.type === 'text' ? `${assistantTextPart.text.substring(0, 60)}...` : '')}
                 </div>
               )}
             </div>
@@ -101,7 +108,7 @@ export const ConversationNode = memo(({ data }: NodeProps<ConversationNodeData>)
                 transition={{ duration: 0.3, ease: 'easeInOut' }}
                 className="overflow-hidden"
               >
-                <div className="border-t border-blue-200/50 px-4 pb-4 pt-3 dark:border-blue-800/30">
+                <div className='border-blue-200/50 border-t px-4 pt-3 pb-4 dark:border-blue-800/30'>
                   {isLoading && !hasAssistantContent ? (
                     <div className="space-y-2.5">
                       <div className="flex items-center gap-2">

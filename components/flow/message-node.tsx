@@ -15,7 +15,8 @@ export type MessageNodeData = {
   isLoading?: boolean;
 };
 
-export const UserMessageNode = memo(({ data }: NodeProps<MessageNodeData>) => {
+export const UserMessageNode = memo((props: NodeProps) => {
+  const data = props.data as MessageNodeData;
   const { message } = data;
   const textPart = message.parts.find((part) => part.type === 'text');
 
@@ -61,7 +62,8 @@ export const UserMessageNode = memo(({ data }: NodeProps<MessageNodeData>) => {
 UserMessageNode.displayName = 'UserMessageNode';
 
 export const AssistantMessageNode = memo(
-  ({ data }: NodeProps<MessageNodeData>) => {
+  (props: NodeProps) => {
+    const data = props.data as MessageNodeData;
     const { message, isLoading } = data;
     const textPart = message.parts.find((part) => part.type === 'text');
     const hasContent = textPart?.type === 'text' && textPart.text;

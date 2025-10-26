@@ -213,6 +213,7 @@ export async function getChatById({ id }: { id: string }) {
 
     return selectedChat;
   } catch (error) {
+    console.error('getChatById error:', error);
     throw new ChatSDKError('bad_request:database', 'Failed to get chat by id');
   }
 }

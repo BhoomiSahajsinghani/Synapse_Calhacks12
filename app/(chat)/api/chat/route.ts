@@ -144,7 +144,8 @@ export async function POST(request: Request) {
         visibility: selectedVisibilityType,
       });
     } else {
-      if (chat.userId !== session.user.id) {
+      // Allow collaboration on public chats or chats owned by the user
+      if (chat.visibility !== 'public' && chat.userId !== session.user.id) {
         return new ChatSDKError('forbidden:chat').toResponse();
       }
     }
