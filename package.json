@@ -29,6 +29,7 @@
     "@codemirror/state": "^6.5.0",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.35.3",
+    "@dagrejs/dagre": "^1.1.5",
     "@google/genai": "^1.19.0",
     "@icons-pack/react-simple-icons": "^13.7.0",
     "@liveblocks/client": "^3.9.1",

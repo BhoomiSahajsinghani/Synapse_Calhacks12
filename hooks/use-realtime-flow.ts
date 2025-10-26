@@ -8,7 +8,7 @@ import {
   useSelf
 } from '@/liveblocks.config';
 import type { LiveFlowNode, LiveFlowEdge, NodeLock } from '@/liveblocks.config';
-import { LOCK_TIMEOUT_MS, isLockExpired } from '@/liveblocks.config';
+import { LOCK_TIMEOUT_MS, isLockExpired, generateUserColor } from '@/liveblocks.config';
 import { debounce } from '@/lib/utils';
 
 interface UseRealtimeFlowProps {
@@ -29,6 +29,7 @@ export function useRealtimeFlow({
   const self = useSelf();
   const userId = self?.id || 'anonymous';
   const userName = self?.info?.name || 'Anonymous';
+  const userColor = self?.info?.color || generateUserColor(userId);
 
   // Use state for reactive updates
   const [localNodes, setLocalNodes] = useState<Node[]>(initialNodes);
@@ -48,12 +49,21 @@ export function useRealtimeFlow({
 
   const broadcastEvent = useBroadcastEvent();
 
-  // Initialize storage with initial data if empty
+  // Initialize storage with initial data if empty - prevent duplicates
   const initializeStorage = useMutation(({ storage }, nodes: Node[], edges: Edge[]) => {
     const flowNodesMap = storage.get('flowNodes');
     const flowEdgesMap = storage.get('flowEdges');
 
-    if (flowNodesMap.size === 0 && nodes.length > 0) {
+    // Check if there's already data for this chat
+    let hasExistingData = false;
+    flowNodesMap.forEach((node) => {
+      if (node.chatId === chatId) {
+        hasExistingData = true;
+      }
+    });
+
+    // Only initialize if truly empty for this chat
+    if (!hasExistingData && nodes.length > 0) {
       nodes.forEach(node => {
         const liveNode: LiveFlowNode = {
           id: node.id,
@@ -68,7 +78,15 @@ export function useRealtimeFlow({
       });
     }
 
-    if (flowEdgesMap.size === 0 && edges.length > 0) {
+    // Check edges similarly
+    let hasExistingEdges = false;
+    flowEdgesMap.forEach((edge) => {
+      if (edge.chatId === chatId) {
+        hasExistingEdges = true;
+      }
+    });
+
+    if (!hasExistingEdges && edges.length > 0) {
       edges.forEach(edge => {
         const liveEdge: LiveFlowEdge = {
           id: edge.id,
@@ -79,11 +97,13 @@ export function useRealtimeFlow({
           style: edge.style,
           chatId,
           createdAt: new Date().toISOString(),
+          creatorId: userId,
+          creatorColor: userColor,
         };
         flowEdgesMap.set(edge.id, liveEdge);
       });
     }
-  }, []);
+  }, [chatId, userId, userColor]);
 
   // Track last synced nodes to avoid unnecessary updates
   const lastSyncedNodesRef = useRef<string>('');
@@ -92,9 +112,11 @@ export function useRealtimeFlow({
   useEffect(() => {
     if (!flowNodes) return;
 
+    console.log('🔄 Syncing nodes from Liveblocks to local state');
     const nodes: Node[] = [];
     flowNodes.forEach((liveNode) => {
       if (liveNode.chatId === chatId) {
+        console.log('  Found node in Liveblocks:', liveNode.id, liveNode.type);
         // Find existing local node to preserve other properties
         const existingNode = localNodesRef.current.find(n => n.id === liveNode.id);
         if (existingNode) {
@@ -106,11 +128,20 @@ export function useRealtimeFlow({
           });
         } else {
           // New node, add it completely
+          // For prompt nodes, we need to reconstruct the onCancel function
+          // since functions can't be serialized in Liveblocks
+          const nodeData = liveNode.type === 'promptNode'
+            ? {
+                ...liveNode.data,
+                onCancel: undefined, // This will be added by the parent component
+              }
+            : liveNode.data;
+
           nodes.push({
             id: liveNode.id,
             type: liveNode.type,
             position: liveNode.position,
-            data: liveNode.data,
+            data: nodeData,
           });
         }
       }
@@ -140,13 +171,24 @@ export function useRealtimeFlow({
     const edges: Edge[] = [];
     flowEdges.forEach((liveEdge) => {
       if (liveEdge.chatId === chatId) {
+        // Apply creator's color to edge style
+        const edgeStyle = {
+          ...liveEdge.style,
+          stroke: liveEdge.creatorColor || '#888',
+          strokeWidth: 2,
+        };
+
         edges.push({
           id: liveEdge.id,
           source: liveEdge.source,
           target: liveEdge.target,
           type: liveEdge.type,
           animated: liveEdge.animated,
-          style: liveEdge.style,
+          style: edgeStyle,
+          data: {
+            creatorId: liveEdge.creatorId,
+            creatorColor: liveEdge.creatorColor,
+          },
         });
       }
     });
@@ -183,8 +225,11 @@ export function useRealtimeFlow({
 
   // Update nodes in storage
   const updateNodes = useMutation(({ storage }, changes: NodeChange[]) => {
-    const flowNodesMap = storage.get('flowNodes');
-    const updatedNodes = applyNodeChanges(changes, localNodesRef.current);
+    try {
+      const flowNodesMap = storage.get('flowNodes');
+      if (!flowNodesMap) return;
+
+      const updatedNodes = applyNodeChanges(changes, localNodesRef.current);
 
     updatedNodes.forEach(node => {
       const existingNode = flowNodesMap.get(node.id);
@@ -211,46 +256,64 @@ export function useRealtimeFlow({
     });
 
     localNodesRef.current = updatedNodes;
+    } catch (error) {
+      console.warn('Storage not ready for updateNodes:', error);
+    }
   }, [chatId]);
 
   // Debounced node position update - optimized for responsiveness
   const debouncedUpdateNodePosition = useRef(
     debounce((nodeId: string, position: { x: number; y: number }) => {
-      updateNodePosition(nodeId, position);
+      try {
+        updateNodePosition(nodeId, position);
+      } catch (error) {
+        console.warn('Storage not ready for position update:', error);
+      }
     }, 50) // Much faster updates for responsive feel
   ).current;
 
   // Update single node position
   const updateNodePosition = useMutation(({ storage }, nodeId: string, position: { x: number; y: number }) => {
-    const flowNodesMap = storage.get('flowNodes');
-    const node = flowNodesMap.get(nodeId);
+    try {
+      const flowNodesMap = storage.get('flowNodes');
+      if (!flowNodesMap) return;
 
-    if (node && node.chatId === chatId) {
-      // Always update position for immediate responsiveness
-      node.position = position;
-      node.updatedAt = new Date().toISOString();
-      flowNodesMap.set(nodeId, node);
+      const node = flowNodesMap.get(nodeId);
+      if (node && node.chatId === chatId) {
+        // Always update position for immediate responsiveness
+        node.position = position;
+        node.updatedAt = new Date().toISOString();
+        flowNodesMap.set(nodeId, node);
+      }
+    } catch (error) {
+      console.warn('Storage not ready for updateNodePosition:', error);
     }
   }, [chatId]);
 
   // Update edges in storage
   const updateEdges = useMutation(({ storage }, changes: EdgeChange[]) => {
-    const flowEdgesMap = storage.get('flowEdges');
-    const updatedEdges = applyEdgeChanges(changes, localEdgesRef.current);
+    try {
+      const flowEdgesMap = storage.get('flowEdges');
+      if (!flowEdgesMap) return;
 
-    updatedEdges.forEach(edge => {
-      const liveEdge: LiveFlowEdge = {
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        type: edge.type,
-        animated: edge.animated,
-        // style: edge.style,
-        chatId,
-        createdAt: flowEdgesMap.get(edge.id)?.createdAt || new Date().toISOString(),
-      };
-      flowEdgesMap.set(edge.id, liveEdge);
-    });
+      const updatedEdges = applyEdgeChanges(changes, localEdgesRef.current);
+
+      updatedEdges.forEach(edge => {
+        const existingEdge = flowEdgesMap.get(edge.id);
+        const liveEdge: LiveFlowEdge = {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          type: edge.type,
+          animated: edge.animated,
+          style: (edge as any).style,
+          chatId,
+          createdAt: existingEdge?.createdAt || new Date().toISOString(),
+          creatorId: existingEdge?.creatorId || userId,
+          creatorColor: existingEdge?.creatorColor || userColor,
+        };
+        flowEdgesMap.set(edge.id, liveEdge);
+      });
 
     // Remove deleted edges
     const edgeIds = new Set(updatedEdges.map(e => e.id));
@@ -262,53 +325,97 @@ export function useRealtimeFlow({
     });
 
     localEdgesRef.current = updatedEdges;
-  }, [chatId]);
+    } catch (error) {
+      console.warn('Storage not ready for updateEdges:', error);
+    }
+  }, [chatId, userId, userColor]);
 
-  // Add new node
+  // Add new node - prevent duplicates
   const addNode = useMutation(({ storage }, node: Node) => {
-    const flowNodesMap = storage.get('flowNodes');
-    const liveNode: LiveFlowNode = {
-      id: node.id,
-      type: node.type || 'default',
-      position: node.position,
-      data: node.data,
-      chatId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    flowNodesMap.set(node.id, liveNode);
+    try {
+      const flowNodesMap = storage.get('flowNodes');
+      if (!flowNodesMap) {
+        console.error('❌ flowNodesMap is null, cannot add node');
+        return;
+      }
+
+      // Check if node already exists
+      if (flowNodesMap.has(node.id)) {
+        console.log('Node already exists in Liveblocks, skipping add:', node.id);
+        return;
+      }
+
+      console.log('✅ Adding node to Liveblocks:', node.id, node.type);
+      const liveNode: LiveFlowNode = {
+        id: node.id,
+        type: node.type || 'default',
+        position: node.position,
+        data: node.data,
+        chatId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      flowNodesMap.set(node.id, liveNode);
+      console.log('✅ Node added successfully to Liveblocks');
+    } catch (error) {
+      console.warn('Storage not ready for addNode:', error);
+    }
   }, [chatId]);
 
-  // Add new edge
+  // Add new edge - prevent duplicates
   const addEdge = useMutation(({ storage }, edge: Edge) => {
-    const flowEdgesMap = storage.get('flowEdges');
-    const liveEdge: LiveFlowEdge = {
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      type: edge.type,
-      animated: edge.animated,
-      style: edge.style,
-      chatId,
-      createdAt: new Date().toISOString(),
-    };
-    flowEdgesMap.set(edge.id, liveEdge);
-  }, [chatId]);
+    try {
+      const flowEdgesMap = storage.get('flowEdges');
+      if (!flowEdgesMap) return;
+
+      // Check if edge already exists
+      if (flowEdgesMap.has(edge.id)) {
+        console.log('Edge already exists in Liveblocks, skipping add:', edge.id);
+        return;
+      }
+
+      const liveEdge: LiveFlowEdge = {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: edge.type,
+        animated: edge.animated,
+        style: {
+          ...(edge as any).style,
+          stroke: userColor,
+          strokeWidth: 2,
+        },
+        chatId,
+        createdAt: new Date().toISOString(),
+        creatorId: userId,
+        creatorColor: userColor,
+      };
+      flowEdgesMap.set(edge.id, liveEdge);
+    } catch (error) {
+      console.warn('Storage not ready for addEdge:', error);
+    }
+  }, [chatId, userId, userColor]);
 
   // Delete node
   const deleteNode = useMutation(({ storage }, nodeId: string) => {
-    const flowNodesMap = storage.get('flowNodes');
-    const flowEdgesMap = storage.get('flowEdges');
+    try {
+      const flowNodesMap = storage.get('flowNodes');
+      const flowEdgesMap = storage.get('flowEdges');
 
-    // Delete the node
-    flowNodesMap.delete(nodeId);
+      if (!flowNodesMap || !flowEdgesMap) return;
 
-    // Delete connected edges
-    flowEdgesMap.forEach((edge, id) => {
-      if (edge.source === nodeId || edge.target === nodeId) {
-        flowEdgesMap.delete(id);
-      }
-    });
+      // Delete the node
+      flowNodesMap.delete(nodeId);
+
+      // Delete connected edges
+      flowEdgesMap.forEach((edge, id) => {
+        if (edge.source === nodeId || edge.target === nodeId) {
+          flowEdgesMap.delete(id);
+        }
+      });
+    } catch (error) {
+      console.warn('Storage not ready for deleteNode:', error);
+    }
   }, []);
 
   // Lock management

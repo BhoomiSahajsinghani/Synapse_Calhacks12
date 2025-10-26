@@ -1,4 +1,4 @@
-import 'server-only';
+'use server'
 
 import {
   and,
@@ -27,10 +27,6 @@ import {
   type DBMessage,
   type Chat,
   stream,
-  flowNode,
-  flowEdge,
-  type FlowNode,
-  type FlowEdge,
 } from './schema';
 import type { ArtifactKind } from '@/components/artifact';
 import { generateUUID } from '../utils';

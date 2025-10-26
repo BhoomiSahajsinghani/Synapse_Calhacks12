@@ -309,3 +309,35 @@
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
+
+/* ReactFlow styling for consistent dark mode */
+.react-flow {
+  background: var(--background);
+}
+
+.react-flow__background {
+  background: var(--background);
+}
+
+.react-flow__controls {
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+.react-flow__controls-button {
+  background: var(--card);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--accent);
+}
+
+.react-flow__edge-path {
+  stroke: var(--border);
+}
+
+.react-flow__node {
+  color: var(--foreground);
+}
