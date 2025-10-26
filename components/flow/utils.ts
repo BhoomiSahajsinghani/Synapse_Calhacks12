@@ -1,12 +1,16 @@
 import type { Node, Edge } from '@xyflow/react';
 import type { ChatMessage } from '@/lib/types';
 import type { ConversationNodeData } from './conversation-node';
+import type { PromptNodeData } from './prompt-node';
+
+// Union type for all node data types
+type FlowNodeData = ConversationNodeData | PromptNodeData;
 
 export function messagesToNodesAndEdges(
   messages: ChatMessage[],
   status?: string
-): { nodes: Node<ConversationNodeData>[]; edges: Edge[] } {
-  const nodes: Node<ConversationNodeData>[] = [];
+): { nodes: Node<FlowNodeData>[]; edges: Edge[] } {
+  const nodes: Node<FlowNodeData>[] = [];
   const edges: Edge[] = [];
 
   // Vertical spacing between nodes

@@ -128,7 +128,10 @@
         "rules": {
           "correctness": {
             "noEmptyPattern": "off"
-          }
+          },
+          "style": {
+            "useImportType": "off"
+        }
         }
       }
     }

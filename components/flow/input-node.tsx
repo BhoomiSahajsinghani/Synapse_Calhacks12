@@ -13,7 +13,8 @@ export type InputNodeData = {
   onInputChange?: (value: string) => void;
 };
 
-export const InputNode = memo(({ data }: NodeProps<InputNodeData>) => {
+export const InputNode = memo((props: NodeProps) => {
+  const data = props.data as InputNodeData;
   const { sendMessage, status, onInputChange } = data;
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);

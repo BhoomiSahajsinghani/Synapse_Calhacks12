@@ -14,7 +14,9 @@ export type PromptNodeData = {
   parentNodeId?: string;
 };
 
-export const PromptNode = memo(({ id, data }: NodeProps<PromptNodeData>) => {
+export const PromptNode = memo((props: NodeProps) => {
+  const { id } = props;
+  const data = props.data as PromptNodeData;
   const { sendMessage, status, onCancel } = data;
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -73,7 +75,7 @@ export const PromptNode = memo(({ id, data }: NodeProps<PromptNodeData>) => {
 
       <div className="min-w-[400px] max-w-[600px] overflow-hidden rounded-xl border-2 border-green-500/50 bg-background shadow-xl">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border bg-gradient-to-br from-green-50/50 to-emerald-50/50 px-4 py-2 dark:from-green-950/20 dark:to-emerald-950/20">
+        <div className='flex items-center justify-between border-border border-b bg-gradient-to-br from-green-50/50 to-emerald-50/50 px-4 py-2 dark:from-green-950/20 dark:to-emerald-950/20'>
           <div className="flex items-center gap-2">
             <div className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
             <span className="font-semibold text-green-900 text-xs uppercase tracking-wide dark:text-green-300">
@@ -115,7 +117,7 @@ export const PromptNode = memo(({ id, data }: NodeProps<PromptNodeData>) => {
             <button
               type="submit"
               disabled={isDisabled || !input.trim()}
-              className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 font-medium text-white text-sm transition-all hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-green-600"
+              className='flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 font-medium text-sm text-white transition-all hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-green-600'
             >
               <Send size={16} />
               Send

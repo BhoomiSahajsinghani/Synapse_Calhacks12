@@ -47,8 +47,6 @@ export async function saveFlowData({
         positionY: node.position.y.toString(),
         data: node.data,
         parentNodeId: (node.data as any)?.parentNodeId,
-        userMessageId: (node.data as any)?.userMessage?.id,
-        assistantMessageId: (node.data as any)?.assistantMessage?.id,
       }));
 
     // Convert edges to database format
@@ -61,6 +59,7 @@ export async function saveFlowData({
       style: edge.style,
     }));
 
+    // Save to database - errors are handled gracefully in the save functions
     await Promise.all([
       saveFlowNodes({ nodes: dbNodes, chatId }),
       saveFlowEdges({ edges: dbEdges, chatId }),

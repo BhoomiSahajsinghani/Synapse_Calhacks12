@@ -23,8 +23,6 @@ export async function saveFlowNode({
   positionY,
   data,
   parentNodeId,
-  userMessageId,
-  assistantMessageId,
 }: {
   id: string;
   chatId: string;
@@ -33,8 +31,6 @@ export async function saveFlowNode({
   positionY: string;
   data: any;
   parentNodeId?: string;
-  userMessageId?: string;
-  assistantMessageId?: string;
 }) {
   try {
     return await db
@@ -47,8 +43,6 @@ export async function saveFlowNode({
         positionY,
         data,
         parentNodeId,
-        userMessageId,
-        assistantMessageId,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -59,8 +53,6 @@ export async function saveFlowNode({
           positionY,
           data,
           parentNodeId,
-          userMessageId,
-          assistantMessageId,
           updatedAt: new Date(),
         },
       });
@@ -81,8 +73,6 @@ export async function saveFlowNodes({
     positionY: string;
     data: any;
     parentNodeId?: string;
-    userMessageId?: string;
-    assistantMessageId?: string;
   }>;
   chatId: string;
 }) {
@@ -97,8 +87,6 @@ export async function saveFlowNodes({
       positionY: node.positionY,
       data: node.data,
       parentNodeId: node.parentNodeId,
-      userMessageId: node.userMessageId,
-      assistantMessageId: node.assistantMessageId,
       createdAt: new Date(),
       updatedAt: new Date(),
     }));
@@ -113,12 +101,15 @@ export async function saveFlowNodes({
           positionY: values[0].positionY,
           data: values[0].data,
           parentNodeId: values[0].parentNodeId,
-          userMessageId: values[0].userMessageId,
-          assistantMessageId: values[0].assistantMessageId,
           updatedAt: new Date(),
         },
       });
-  } catch (error) {
+  } catch (error: any) {
+    // If it's a foreign key constraint error (chat doesn't exist), don't throw
+    if (error?.code === '23503') {
+      console.warn('Chat does not exist yet, skipping flow node save');
+      return null;
+    }
     console.error('Failed to save flow nodes:', error);
     throw new ChatSDKError('bad_request:database', 'Failed to save flow nodes');
   }
@@ -298,7 +289,12 @@ export async function saveFlowEdges({
           style: values[0].style,
         },
       });
-  } catch (error) {
+  } catch (error: any) {
+    // If it's a foreign key constraint error (chat doesn't exist), don't throw
+    if (error?.code === '23503') {
+      console.warn('Chat does not exist yet, skipping flow edge save');
+      return null;
+    }
     console.error('Failed to save flow edges:', error);
     throw new ChatSDKError('bad_request:database', 'Failed to save flow edges');
   }
@@ -354,8 +350,6 @@ export async function deleteFlowEdgesByChatId({ chatId }: { chatId: string }) {
 export function reactFlowNodeToDb(
   node: Node,
   chatId: string,
-  userMessageId?: string,
-  assistantMessageId?: string,
 ): Parameters<typeof saveFlowNode>[0] {
   return {
     id: node.id,
@@ -365,8 +359,6 @@ export function reactFlowNodeToDb(
     positionY: node.position.y.toString(),
     data: node.data,
     parentNodeId: (node.data as any)?.parentNodeId,
-    userMessageId,
-    assistantMessageId,
   };
 }
 

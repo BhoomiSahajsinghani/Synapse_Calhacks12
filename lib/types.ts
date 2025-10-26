@@ -7,8 +7,24 @@ import type { InferUITool, UIMessage } from 'ai';
 import type { AppUsage } from './usage';
 import type { ArtifactKind } from '@/components/artifact';
 import type { Suggestion } from './db/schema';
-import type { StockData } from './ai/tools/getStock';
+// import type { StockData } from './ai/tools/getStock'; // Temporarily disabled
 // Note: Supermemory tool types are defined inline for UI compatibility.
+
+// Temporarily define StockData here since getStock.ts is commented out
+interface StockData {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  volume: number;
+  marketCap?: number;
+  high: number;
+  low: number;
+  open: number;
+  previousClose: number;
+  lastUpdated: string;
+}
 
 export type DataPart = { type: 'append-message'; message: string };
 
