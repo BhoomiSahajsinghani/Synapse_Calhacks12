@@ -146,11 +146,6 @@ export function PresenceAvatars({
 
   return (
     <div className={cn('flex items-center', className)}>
-      {/* User count */}
-      <div className="mr-3 text-sm text-muted-foreground">
-        {allUsers.length} {allUsers.length === 1 ? 'user' : 'users'} online
-      </div>
-
       {/* Avatar stack */}
       <div className="flex -space-x-2">
         <AnimatePresence mode="popLayout">

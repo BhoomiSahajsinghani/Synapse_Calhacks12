@@ -44,7 +44,14 @@ export function useRealtimeFlow({
 
   // Get storage
   const flowNodes = useStorage((root) => root.flowNodes);
-  const flowEdges = useStorage((root) => root.flowEdges);
+  // Use a shallow selector that creates a new array to force re-renders
+  const flowEdges = useStorage((root) => {
+    const edges = root.flowEdges;
+    if (!edges) return null;
+    // Force a new reference by converting to array and back to Map
+    // This ensures React detects the change
+    return new Map(edges.entries());
+  });
   const nodeLocks = useStorage((root) => root.nodeLocks);
 
   const broadcastEvent = useBroadcastEvent();
@@ -64,6 +71,7 @@ export function useRealtimeFlow({
 
     // Only initialize if truly empty for this chat
     if (!hasExistingData && nodes.length > 0) {
+      console.log('🎯 Initializing storage with', nodes.length, 'nodes for chat:', chatId);
       nodes.forEach(node => {
         const liveNode: LiveFlowNode = {
           id: node.id,
@@ -75,6 +83,7 @@ export function useRealtimeFlow({
           updatedAt: new Date().toISOString(),
         };
         flowNodesMap.set(node.id, liveNode);
+        console.log('  Added node to initial storage:', node.id, node.type);
       });
     }
 
@@ -120,11 +129,22 @@ export function useRealtimeFlow({
         // Find existing local node to preserve other properties
         const existingNode = localNodesRef.current.find(n => n.id === liveNode.id);
         if (existingNode) {
-          // Only update position and data, preserve other properties like dragging state
+          // Preserve functions and update data from Liveblocks
+          const preservedData = {
+            ...liveNode.data,
+            // Preserve functions that can't be serialized
+            ...(existingNode.data && typeof existingNode.data === 'object' ? {
+              onCancel: (existingNode.data as any).onCancel,
+              sendMessage: (existingNode.data as any).sendMessage,
+              onAddNewNode: (existingNode.data as any).onAddNewNode,
+            } : {}),
+          };
+
           nodes.push({
             ...existingNode,
+            type: liveNode.type, // Update type in case of transformation
             position: liveNode.position,
-            data: liveNode.data,
+            data: preservedData,
           });
         } else {
           // New node, add it completely
@@ -134,6 +154,12 @@ export function useRealtimeFlow({
             ? {
                 ...liveNode.data,
                 onCancel: undefined, // This will be added by the parent component
+                sendMessage: undefined, // This will be added by the parent component
+              }
+            : liveNode.type === 'answerNode'
+            ? {
+                ...liveNode.data,
+                onAddNewNode: undefined, // This will be added by the parent component
               }
             : liveNode.data;
 
@@ -150,14 +176,19 @@ export function useRealtimeFlow({
     // Check if nodes have actually changed
     const nodesString = JSON.stringify(nodes.map(n => ({
       id: n.id,
+      type: n.type, // Include type in comparison
       position: n.position,
       data: n.data
     })));
     if (nodesString !== lastSyncedNodesRef.current) {
+      console.log('🔄 Nodes changed, updating local state with', nodes.length, 'nodes');
+      console.log('  Node types:', nodes.map(n => ({ id: n.id, type: n.type })));
       lastSyncedNodesRef.current = nodesString;
       localNodesRef.current = nodes;
       setLocalNodes(nodes);
       onNodesChange?.(nodes);
+    } else {
+      console.log('⏸️  No node changes detected, skipping update');
     }
   }, [flowNodes, chatId, onNodesChange]);
 
@@ -165,26 +196,24 @@ export function useRealtimeFlow({
   const lastSyncedEdgesRef = useRef<string>('');
 
   // Sync edges from storage to local state
-  useEffect(() => {
+  const syncEdgesFromStorage = useCallback(() => {
     if (!flowEdges) return;
 
+    console.log('🔄 Syncing edges from Liveblocks to local state for chat:', chatId);
     const edges: Edge[] = [];
+    let totalEdgesInStorage = 0;
     flowEdges.forEach((liveEdge) => {
+      totalEdgesInStorage++;
       if (liveEdge.chatId === chatId) {
-        // Apply creator's color to edge style
-        const edgeStyle = {
-          ...liveEdge.style,
-          stroke: liveEdge.creatorColor || '#888',
-          strokeWidth: 2,
-        };
-
+        console.log('  ✅ Found edge for this chat:', liveEdge.id, 'from', liveEdge.source, 'to', liveEdge.target, 'style:', liveEdge.style);
+        // Use the style as-is from Liveblocks (it includes color, strokeDasharray, etc.)
         edges.push({
           id: liveEdge.id,
           source: liveEdge.source,
           target: liveEdge.target,
-          type: liveEdge.type,
+          type: liveEdge.type || 'smoothstep',
           animated: liveEdge.animated,
-          style: edgeStyle,
+          style: liveEdge.style || {}, // Use the full style from Liveblocks
           data: {
             creatorId: liveEdge.creatorId,
             creatorColor: liveEdge.creatorColor,
@@ -193,15 +222,57 @@ export function useRealtimeFlow({
       }
     });
 
-    // Check if edges have actually changed
-    const edgesString = JSON.stringify(edges);
-    if (edgesString !== lastSyncedEdgesRef.current) {
-      lastSyncedEdgesRef.current = edgesString;
+    console.log(`📊 Total edges in storage: ${totalEdgesInStorage}, Edges for this chat: ${edges.length}`);
+
+    // Always update if we have a different number of edges
+    if (edges.length !== localEdgesRef.current.length) {
+      console.log('🔄 Edge count changed, updating local state');
       localEdgesRef.current = edges;
       setLocalEdges(edges);
       onEdgesChange?.(edges);
+      lastSyncedEdgesRef.current = JSON.stringify(edges);
+    } else {
+      // Check if edges have actually changed
+      const edgesString = JSON.stringify(edges);
+      if (edgesString !== lastSyncedEdgesRef.current) {
+        console.log('🔄 Edge data changed, updating local state');
+        lastSyncedEdgesRef.current = edgesString;
+        localEdgesRef.current = edges;
+        setLocalEdges(edges);
+        onEdgesChange?.(edges);
+      } else {
+        console.log('⏸️  No edge changes detected');
+      }
     }
   }, [flowEdges, chatId, onEdgesChange]);
+
+  // Sync edges when storage changes
+  useEffect(() => {
+    syncEdgesFromStorage();
+  }, [syncEdgesFromStorage]);
+
+  // Periodic edge sync as fallback (every 2 seconds)
+  useEffect(() => {
+    if (!flowEdges) return;
+
+    const interval = setInterval(() => {
+      console.log('⏰ Periodic edge sync check');
+      syncEdgesFromStorage();
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [flowEdges, syncEdgesFromStorage]);
+
+  // Listen for edge-added broadcast events
+  useEventListener(({ event }) => {
+    if (event.type === 'edge-added' && event.chatId === chatId && event.userId !== userId) {
+      console.log('📡 Received edge-added event from another user, syncing edges');
+      // Force a re-sync of edges
+      setTimeout(() => {
+        syncEdgesFromStorage();
+      }, 100); // Small delay to ensure storage is updated
+    }
+  });
 
   // Check if storage is loaded
   const isStorageLoaded = flowNodes !== null && flowEdges !== null && nodeLocks !== null;
@@ -229,6 +300,7 @@ export function useRealtimeFlow({
       const flowNodesMap = storage.get('flowNodes');
       if (!flowNodesMap) return;
 
+      console.log('📝 Updating nodes in Liveblocks:', changes);
       const updatedNodes = applyNodeChanges(changes, localNodesRef.current);
 
     updatedNodes.forEach(node => {
@@ -244,6 +316,7 @@ export function useRealtimeFlow({
         updatedAt: new Date().toISOString(),
       };
       flowNodesMap.set(node.id, liveNode);
+      console.log('  Updated node:', node.id, 'type:', node.type);
     });
 
     // Remove deleted nodes
@@ -300,19 +373,27 @@ export function useRealtimeFlow({
 
       updatedEdges.forEach(edge => {
         const existingEdge = flowEdgesMap.get(edge.id);
+
+        // Only update edges that belong to this chat
+        if (existingEdge && existingEdge.chatId !== chatId) {
+          console.warn('⚠️ Skipping edge update - belongs to different chat:', edge.id);
+          return;
+        }
+
         const liveEdge: LiveFlowEdge = {
           id: edge.id,
           source: edge.source,
           target: edge.target,
-          type: edge.type,
+          type: edge.type || 'smoothstep',
           animated: edge.animated,
-          style: (edge as any).style,
-          chatId,
+          style: (edge as any).style || {},
+          chatId, // Always use the current chatId
           createdAt: existingEdge?.createdAt || new Date().toISOString(),
           creatorId: existingEdge?.creatorId || userId,
           creatorColor: existingEdge?.creatorColor || userColor,
         };
         flowEdgesMap.set(edge.id, liveEdge);
+        console.log('📝 Updated edge in Liveblocks:', edge.id);
       });
 
     // Remove deleted edges
@@ -366,7 +447,10 @@ export function useRealtimeFlow({
   const addEdge = useMutation(({ storage }, edge: Edge) => {
     try {
       const flowEdgesMap = storage.get('flowEdges');
-      if (!flowEdgesMap) return;
+      if (!flowEdgesMap) {
+        console.error('❌ flowEdgesMap is null, cannot add edge');
+        return;
+      }
 
       // Check if edge already exists
       if (flowEdgesMap.has(edge.id)) {
@@ -374,27 +458,129 @@ export function useRealtimeFlow({
         return;
       }
 
+      console.log('✅ Adding edge to Liveblocks:', edge.id, 'from', edge.source, 'to', edge.target, 'for chat:', chatId);
+
+      // Get creator info from edge data if available, otherwise use current user
+      const edgeData = (edge as any).data || {};
+      const creatorId = edgeData.creatorId || userId;
+      const creatorColor = edgeData.creatorColor || userColor;
+
       const liveEdge: LiveFlowEdge = {
         id: edge.id,
         source: edge.source,
         target: edge.target,
-        type: edge.type,
+        type: edge.type || 'smoothstep',
         animated: edge.animated,
-        style: {
-          ...(edge as any).style,
-          stroke: userColor,
-          strokeWidth: 2,
-        },
-        chatId,
+        style: (edge as any).style || {}, // Preserve the original style completely
+        chatId, // This is crucial - make sure chatId is set
         createdAt: new Date().toISOString(),
-        creatorId: userId,
-        creatorColor: userColor,
+        creatorId,
+        creatorColor,
       };
       flowEdgesMap.set(edge.id, liveEdge);
+      console.log('✅ Edge added successfully to Liveblocks:', {
+        id: liveEdge.id,
+        chatId: liveEdge.chatId,
+        style: liveEdge.style,
+        creatorId: liveEdge.creatorId,
+        creatorColor: liveEdge.creatorColor
+      });
+
+      // Broadcast the edge addition to notify other users
+      broadcastEvent({
+        type: 'edge-added',
+        edgeId: edge.id,
+        chatId: liveEdge.chatId,
+        userId,
+      });
     } catch (error) {
       console.warn('Storage not ready for addEdge:', error);
     }
-  }, [chatId, userId, userColor]);
+  }, [chatId, userId, userColor, broadcastEvent]);
+
+  // Update node data (for transformations and data updates)
+  const updateNodeData = useMutation(({ storage }, nodeId: string, newData: any, newType?: string, nodePosition?: { x: number; y: number }) => {
+    try {
+      const flowNodesMap = storage.get('flowNodes');
+      if (!flowNodesMap) {
+        console.error('❌ flowNodesMap is null, cannot update node data');
+        return;
+      }
+
+      const existingNode = flowNodesMap.get(nodeId);
+
+      // If node doesn't exist in Liveblocks yet, we need to add it first
+      if (!existingNode) {
+        console.warn(`⚠️ Node ${nodeId} not found in Liveblocks, attempting to add it first`);
+
+        // If we don't have position, we can't add the node
+        if (!nodePosition) {
+          console.error('❌ Cannot add node without position:', nodeId);
+          return;
+        }
+
+        // Add the node to Liveblocks first
+        const liveNode: LiveFlowNode = {
+          id: nodeId,
+          type: newType || 'default',
+          position: nodePosition,
+          data: newData,
+          chatId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        flowNodesMap.set(nodeId, liveNode);
+        console.log('✅ Node added to Liveblocks:', nodeId);
+
+        // Broadcast the addition
+        broadcastEvent({
+          type: 'node-added',
+          nodeId,
+          nodeType: liveNode.type,
+          userId,
+        });
+        return;
+      }
+
+      // Check if it's the wrong chat
+      if (existingNode.chatId !== chatId) {
+        console.error('❌ Node belongs to different chat:', nodeId);
+        return;
+      }
+
+      console.log('🔄 Updating node data in Liveblocks:', nodeId, 'type:', newType || existingNode.type);
+
+      // Update the node with new data and optionally new type
+      const updatedNode: LiveFlowNode = {
+        ...existingNode,
+        type: newType || existingNode.type,
+        data: newData,
+        updatedAt: new Date().toISOString(),
+      };
+
+      flowNodesMap.set(nodeId, updatedNode);
+      console.log('✅ Node data updated successfully in Liveblocks');
+
+      // Broadcast the update for immediate notification
+      if (newType && newType !== existingNode.type) {
+        broadcastEvent({
+          type: 'node-transformed',
+          nodeId,
+          fromType: existingNode.type,
+          toType: newType,
+          userId,
+        });
+      } else {
+        broadcastEvent({
+          type: 'node-data-updated',
+          nodeId,
+          userId,
+        });
+      }
+    } catch (error) {
+      console.warn('Storage not ready for updateNodeData:', error);
+    }
+  }, [chatId, userId]);
 
   // Delete node
   const deleteNode = useMutation(({ storage }, nodeId: string) => {
@@ -402,17 +588,25 @@ export function useRealtimeFlow({
       const flowNodesMap = storage.get('flowNodes');
       const flowEdgesMap = storage.get('flowEdges');
 
-      if (!flowNodesMap || !flowEdgesMap) return;
+      if (!flowNodesMap || !flowEdgesMap) {
+        console.error('❌ Storage maps not available for node deletion');
+        return;
+      }
 
+      console.log('🗑️ Deleting node from Liveblocks:', nodeId);
       // Delete the node
       flowNodesMap.delete(nodeId);
 
       // Delete connected edges
+      let deletedEdges = 0;
       flowEdgesMap.forEach((edge, id) => {
         if (edge.source === nodeId || edge.target === nodeId) {
           flowEdgesMap.delete(id);
+          deletedEdges++;
+          console.log('  Also deleted connected edge:', id);
         }
       });
+      console.log(`✅ Node ${nodeId} deleted, along with ${deletedEdges} connected edges`);
     } catch (error) {
       console.warn('Storage not ready for deleteNode:', error);
     }
@@ -501,11 +695,15 @@ export function useRealtimeFlow({
     return () => clearInterval(interval);
   }, [cleanupExpiredLocks]);
 
-  // Listen for lock events
+  // Listen for lock events and node updates
   useEventListener(({ event }) => {
     if (event.type === 'node-locked' || event.type === 'node-unlocked') {
       // Force re-render to update lock UI
       onNodesChange?.(localNodesRef.current);
+    } else if (event.type === 'node-transformed' || event.type === 'node-data-updated') {
+      // Log the event for debugging
+      console.log('📡 Received broadcast event:', event.type, 'for node:', (event as any).nodeId);
+      // The storage subscription should handle the update, but we log for debugging
     }
   });
 
@@ -516,6 +714,7 @@ export function useRealtimeFlow({
     // Node operations
     updateNodes,
     updateNodePosition: debouncedUpdateNodePosition,
+    updateNodeData,
     addNode,
     deleteNode,
 

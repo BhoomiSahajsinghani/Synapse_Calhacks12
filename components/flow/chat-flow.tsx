@@ -9,7 +9,6 @@ import {
   useNodesState,
   useEdgesState,
   type NodeTypes,
-  addEdge,
   type Connection,
   BackgroundVariant,
   useReactFlow,
@@ -139,14 +138,18 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
     isMessageStreaming,
   } = useRealtimeMessages({
     chatId,
-    onMessageAdded: (_message) => {
-      // Handle new message from other users - could trigger UI updates here
+    onMessageAdded: (message) => {
+      console.log('📨 New message from other user:', message);
+      // When another user sends a message, we should see their node transform too
+      // This will be handled by the message processing effect below
     },
-    onStreamStarted: (_messageId) => {
-      // Handle streaming start - could show loading indicators
+    onStreamStarted: (messageId) => {
+      console.log('🔄 Stream started for message:', messageId);
+      // Another user started streaming - show skeleton
     },
-    onStreamCompleted: (_messageId) => {
-      // Handle streaming completion - could update UI state
+    onStreamCompleted: (messageId) => {
+      console.log('✅ Stream completed for message:', messageId);
+      // Another user's stream completed
     },
   });
 
@@ -256,6 +259,8 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
 
   // Stable callbacks for Liveblocks updates
   const handleNodesChangeFromLiveblocks = useCallback((newNodes: Node[]) => {
+    console.log('📥 Received nodes update from Liveblocks:', newNodes.length, 'nodes');
+
     // Don't overwrite with empty nodes if we have local nodes
     if (newNodes.length === 0 && nodesLocalRef.current.length > 0) {
       console.log('Skipping empty Liveblocks update');
@@ -272,11 +277,8 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
       }
     }
 
-    // Don't update if we have more nodes locally (likely just added one)
-    if (nodesLocalRef.current.length > newNodes.length) {
-      console.log('Skipping Liveblocks update - have more nodes locally');
-      return;
-    }
+    // Always sync nodes from Liveblocks if we have different counts or content
+    console.log('📊 Local nodes:', nodesLocalRef.current.length, 'vs Liveblocks nodes:', newNodes.length);
 
     // Prevent syncing back only during the update
     isReceivingUpdatesRef.current = true;
@@ -302,20 +304,19 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
           return localNode; // Keep the local version
         }
 
-        // For answer nodes, preserve the message data
-        if (localNode.type === 'answerNode') {
+        // For answer nodes, merge properly - take data from Liveblocks but preserve functions
+        if (localNode.type === 'answerNode' || newNode.type === 'answerNode') {
           const localData = localNode.data as AnswerNodeData;
+          const newData = newNode.data as any;
           return {
             ...newNode,
             type: 'answerNode',
             data: {
-              ...localData,
-              // Only update position from Liveblocks, keep message data
-              ...(newNode.data || {}),
-              userMessage: localData.userMessage,
-              assistantMessage: localData.assistantMessage,
-              isLoading: localData.isLoading,
-              onAddNewNode: localData.onAddNewNode,
+              // Take all data from Liveblocks (including messages and loading state)
+              ...newData,
+              // Only preserve local functions that can't be serialized
+              onAddNewNode: localData.onAddNewNode || handleAddNewNodeFromAnswer,
+              isStorageReady: isFlowStorageLoaded,
             }
           };
         }
@@ -331,7 +332,6 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
     newNodes.forEach(newNode => {
       if (!mergedNodes.find(n => n.id === newNode.id)) {
         // For prompt nodes, add the required functions
-        // These will be properly set up later when the node is rendered
         if (newNode.type === 'promptNode') {
           const nodeWithFunctions = {
             ...newNode,
@@ -340,6 +340,17 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
               sendMessage: wrappedSendMessage,
               status: 'ready' as const,
               // onCancel will be added when the component updates
+            },
+          };
+          mergedNodes.push(nodeWithFunctions);
+        } else if (newNode.type === 'answerNode') {
+          // For answer nodes, add with proper functions
+          const nodeWithFunctions = {
+            ...newNode,
+            data: {
+              ...newNode.data,
+              onAddNewNode: handleAddNewNodeFromAnswer,
+              isStorageReady: isFlowStorageLoaded,
             },
           };
           mergedNodes.push(nodeWithFunctions);
@@ -359,31 +370,14 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
   }, [setNodesLocal, isInitialized, wrappedSendMessage, setEdgesLocal]);
 
   const handleEdgesChangeFromLiveblocks = useCallback((newEdges: Edge[]) => {
-    // Don't overwrite if we have more edges locally (likely just added one)
-    if (edgesLocalRef.current.length > newEdges.length) {
-      return;
-    }
+    console.log('📥 Received edges update from Liveblocks:', newEdges.length, 'edges');
 
     // Prevent syncing back only during the update
     isReceivingUpdatesRef.current = true;
 
-    // Create a map of incoming edges for efficient lookup
-    const newEdgesMap = new Map(newEdges.map(e => [e.id, e]));
-
-    // Merge with local edges - preserve local edges not in the update
-    const mergedEdges = edgesLocalRef.current.map(localEdge => {
-      return newEdgesMap.get(localEdge.id) || localEdge;
-    });
-
-    // Add any new edges from Liveblocks that we don't have locally
-    newEdges.forEach(newEdge => {
-      if (!mergedEdges.find(e => e.id === newEdge.id)) {
-        mergedEdges.push(newEdge);
-      }
-    });
-
-    // Update local state with merged edges
-    setEdgesLocal(mergedEdges);
+    // Simply set the edges from Liveblocks as the source of truth
+    // This ensures all users see the same edges
+    setEdgesLocal(newEdges);
 
     // Reset flag immediately using microtask
     Promise.resolve().then(() => {
@@ -397,6 +391,7 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
     nodes,
     edges,
     updateNodes,
+    updateNodeData,
     updateEdges,
     addNode,
     deleteNode,
@@ -555,10 +550,12 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
           setEdgesLocal((eds: any) =>
             eds.filter((e: any) => e.source !== parentId || e.target !== id)
           );
-          // Only delete from storage if it's loaded
-          if (isFlowStorageLoaded && deleteNode) {
-            deleteNode(id);
-          }
+          // Defer Liveblocks mutation to avoid setState during render
+          setTimeout(() => {
+            if (isFlowStorageLoaded && deleteNode) {
+              deleteNode(id);
+            }
+          }, 0);
           nodePositionsRef.current.delete(id);
         },
       },
@@ -575,26 +572,49 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
       target: id,
       type: 'smoothstep',
       style: {
-        stroke: userColor || '#10b981', // Use user's color or fallback to green
+        stroke: userColor || presenceColor || '#10b981', // Use user's color or fallback
         strokeWidth: 3, // Thicker for better visibility
         strokeDasharray: '5,5',
       },
       animated: true,
+      data: {
+        creatorId: stableUserId,
+        creatorColor: userColor || presenceColor || '#10b981',
+      },
     };
 
     setEdgesLocal((eds: any) => [...eds, newEdge]);
 
+    console.log('➕ Adding new prompt node to Liveblocks:', id);
 
-    // Sync to Liveblocks immediately to prevent overwrite
-    if (isFlowStorageLoaded && addNode && addEdge) {
-      // Add node and edge to Liveblocks storage
-      addNode(newNode);
-      addEdge(newEdge);
-    }
+    // Defer syncing to Liveblocks to avoid setState during render
+    setTimeout(() => {
+      if (isFlowStorageLoaded && addNode && addEdge) {
+        // Add node and edge to Liveblocks storage
+        addNode(newNode);
+        addEdge(newEdge);
+        console.log('✅ Node and edge added to Liveblocks');
+      } else {
+        console.warn('⚠️ Storage not ready, will retry adding node to Liveblocks');
+        // Retry adding to Liveblocks when storage becomes ready
+        const retryInterval = setInterval(() => {
+          if (isFlowStorageLoaded && addNode && addEdge) {
+            console.log('🔁 Retry: Adding follow-up node and edge to Liveblocks');
+            addNode(newNode);
+            addEdge(newEdge);
+            console.log('✅ Follow-up node and edge added to Liveblocks');
+            clearInterval(retryInterval);
+          }
+        }, 100);
+
+        // Clear interval after 3 seconds to prevent infinite retries
+        setTimeout(() => clearInterval(retryInterval), 3000);
+      }
+    }, 0);
 
     // Don't save prompt nodes to database - wait until they become answer nodes
     // This prevents the issue where prompt nodes are saved and then loaded back as prompt nodes
-  }, [wrappedSendMessage, status, setNodesLocal, setEdgesLocal, isFlowStorageLoaded, addNode, addEdge, deleteNode, stableUserId, userName, userColor]);
+  }, [wrappedSendMessage, status, setNodesLocal, setEdgesLocal, isFlowStorageLoaded, addNode, addEdge, deleteNode, stableUserId, userName, userColor, presenceColor]);
 
   // Add required functions to nodes that come from Liveblocks
   // This effect must be after handleAddNewNodeFromAnswer is defined
@@ -630,9 +650,12 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
                     setEdgesLocal((eds) =>
                       eds.filter((e) => e.source !== node.id && e.target !== node.id)
                     );
-                    if (isFlowStorageLoaded && deleteNode) {
-                      deleteNode(node.id);
-                    }
+                    // Defer Liveblocks mutation to avoid setState during render
+                    setTimeout(() => {
+                      if (isFlowStorageLoaded && deleteNode) {
+                        deleteNode(node.id);
+                      }
+                    }, 0);
                     nodePositionsRef.current.delete(node.id);
                   },
                 } as PromptNodeData,
@@ -646,6 +669,7 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
                 data: {
                   ...data,
                   onAddNewNode: handleAddNewNodeFromAnswer,
+                  isStorageReady: isFlowStorageLoaded,
                 } as AnswerNodeData,
               };
             }
@@ -746,9 +770,12 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
                   setEdgesLocal((eds: any) =>
                     eds.filter((e: any) => e.source !== node.id && e.target !== node.id)
                   );
-                  if (isFlowStorageLoaded && deleteNode) {
-                    deleteNode(node.id);
-                  }
+                  // Defer Liveblocks mutation to avoid setState during render
+                  setTimeout(() => {
+                    if (isFlowStorageLoaded && deleteNode) {
+                      deleteNode(node.id);
+                    }
+                  }, 0);
                   nodePositionsRef.current.delete(node.id);
                 },
               } as PromptNodeData,
@@ -760,6 +787,7 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
               data: {
                 ...answerData,
                 onAddNewNode: handleAddNewNodeFromAnswer,
+                isStorageReady: isFlowStorageLoaded,
               } as AnswerNodeData,
             } as FlowNode;
           }
@@ -802,25 +830,27 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
         // Mark all current messages as processed since we're loading from saved state
         lastProcessedMessageCount.current = messages.length;
 
-        // Immediately sync to Liveblocks if storage is ready, otherwise wait a bit
-        if (isFlowStorageLoaded && addNode && addEdge) {
-          // Clear any existing Liveblocks data first by not adding anything
-          // Then add our restored nodes
-          restoredNodes.forEach(node => addNode(node));
-          savedEdges.forEach(edge => addEdge(edge));
-        } else {
-          // If storage isn't loaded yet, wait and retry
-          const retryInterval = setInterval(() => {
-            if (isFlowStorageLoaded && addNode && addEdge) {
-              restoredNodes.forEach(node => addNode(node));
-              savedEdges.forEach(edge => addEdge(edge));
-              clearInterval(retryInterval);
-            }
-          }, 100);
+        // Defer sync to Liveblocks to avoid setState during render
+        setTimeout(() => {
+          if (isFlowStorageLoaded && addNode && addEdge) {
+            // Clear any existing Liveblocks data first by not adding anything
+            // Then add our restored nodes
+            restoredNodes.forEach(node => addNode(node));
+            savedEdges.forEach(edge => addEdge(edge));
+          } else {
+            // If storage isn't loaded yet, wait and retry
+            const retryInterval = setInterval(() => {
+              if (isFlowStorageLoaded && addNode && addEdge) {
+                restoredNodes.forEach(node => addNode(node));
+                savedEdges.forEach(edge => addEdge(edge));
+                clearInterval(retryInterval);
+              }
+            }, 100);
 
-          // Clear interval after 2 seconds to prevent memory leak
-          setTimeout(() => clearInterval(retryInterval), 2000);
-        }
+            // Clear interval after 2 seconds to prevent memory leak
+            setTimeout(() => clearInterval(retryInterval), 2000);
+          }
+        }, 0);
       } else {
         // No saved nodes (or only prompt nodes which we don't save)
         // Check if we need to add a new prompt node or reconstruct from messages
@@ -845,6 +875,26 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
           setNodesLocal([initialPromptNode]);
           setEdgesLocal([]);
           lastProcessedMessageCount.current = 0;
+
+          // Defer adding to Liveblocks to avoid setState during render
+          setTimeout(() => {
+            if (isFlowStorageLoaded && addNode) {
+              console.log('➕ Adding initial prompt node to Liveblocks');
+              addNode(initialPromptNode);
+            } else {
+              // If storage isn't ready, try again shortly
+              const retryTimer = setInterval(() => {
+                if (isFlowStorageLoaded && addNode) {
+                  console.log('➕ Retry: Adding initial prompt node to Liveblocks');
+                  addNode(initialPromptNode);
+                  clearInterval(retryTimer);
+                }
+              }, 100);
+
+              // Clear after 2 seconds to prevent infinite retries
+              setTimeout(() => clearInterval(retryTimer), 2000);
+            }
+          }, 0);
         } else {
           // Messages exist but no saved answer nodes yet
           // This can happen if messages are still being processed
@@ -928,6 +978,34 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
 
   const lastProcessedMessageCount = useRef(0);
 
+  // Handle status changes to sync loading states
+  useEffect(() => {
+    if (!isFlowStorageLoaded || !updateNodeData) return;
+
+    console.log('📊 Status changed to:', status);
+
+    // When streaming completes, update all loading nodes
+    if (status === 'ready') {
+      // Defer mutations to avoid setState during render
+      setTimeout(() => {
+        nodesLocal.forEach((node: FlowNode) => {
+          if (node.type === 'answerNode') {
+            const data = node.data as AnswerNodeData;
+            if (data.isLoading && data.assistantMessage) {
+              console.log('✅ Updating node to remove loading state:', node.id);
+              // Update the node to remove loading state
+              updateNodeData(node.id, {
+                ...data,
+                isLoading: false,
+                isStorageReady: isFlowStorageLoaded,
+              }, undefined, node.position);
+            }
+          }
+        });
+      }, 0);
+    }
+  }, [status, nodesLocal, isFlowStorageLoaded, updateNodeData]);
+
   // Handle message changes - only process NEW messages
   useEffect(() => {
     if (!isInitialized || !wrappedSendMessage) return;
@@ -946,6 +1024,8 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
 
     // Double-check we have actual new messages
     if (newMessages.length === 0) return;
+
+    console.log('📬 Processing', newMessages.length, 'new messages');
 
     newMessages.forEach((message) => {
       if (message.role === 'user') {
@@ -975,6 +1055,8 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
           transformedUserMessages.current.add(message.id);
           nodeToMessageMap.current.set(availablePromptNode.id, message.id);
 
+          console.log('🔄 Transforming prompt node to answer node:', availablePromptNode.id);
+
           // Transform prompt node to answer node
           setNodesLocal((currentNodes: any) => {
             const updatedNodes = currentNodes.map((n: any) => {
@@ -985,16 +1067,36 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
                   data: {
                     userMessage: message,
                     assistantMessage: undefined,
-                    isLoading: true,
+                    isLoading: true, // Show loading skeleton
                     onAddNewNode: handleAddNewNodeFromAnswer,
                     creatorId: stableUserId,
                     creatorName: userName,
                     creatorColor: userColor,
+                    isStorageReady: isFlowStorageLoaded,
                   } as AnswerNodeData,
                 };
               }
               return n;
             });
+
+            // IMPORTANT: Update Liveblocks immediately so other users see the transformation
+            if (isFlowStorageLoaded && updateNodeData) {
+              console.log('🔄 Syncing prompt->answer transformation to Liveblocks (with loading state)');
+              const transformedNode = updatedNodes.find((n: any) => n.id === availablePromptNode.id);
+              if (transformedNode) {
+                // Defer mutation to avoid setState during render
+                setTimeout(() => {
+                  // Update the node type and data in Liveblocks storage directly
+                  // This will make other users see the loading skeleton
+                  updateNodeData(
+                    transformedNode.id,
+                    transformedNode.data,
+                    'answerNode', // Change type to answerNode
+                    transformedNode.position // Pass position in case node needs to be added
+                  );
+                }, 0);
+              }
+            }
 
             // Save the transformation to database immediately
             // Now that it's an answer node, we can save it
@@ -1037,6 +1139,7 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
               creatorId: stableUserId,
               creatorName: userName,
               creatorColor: userColor,
+              isStorageReady: isFlowStorageLoaded,
             } as AnswerNodeData,
             draggable: true,
           };
@@ -1077,12 +1180,38 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
                       assistantMessage: message,
                       isLoading: false,
                       onAddNewNode: nodeData.onAddNewNode || handleAddNewNodeFromAnswer,
+                      isStorageReady: isFlowStorageLoaded,
                     },
                   };
                 }
               }
               return n;
             });
+
+            // IMPORTANT: Sync assistant response to Liveblocks immediately
+            if (isFlowStorageLoaded && updateNodeData) {
+              console.log('🔄 Syncing assistant response to Liveblocks');
+              const updatedNode = updatedNodes.find((n: any) => {
+                if (n.type === 'answerNode') {
+                  const nodeData = n.data as AnswerNodeData;
+                  return nodeData.userMessage?.id === userMessage.id;
+                }
+                return false;
+              });
+
+              if (updatedNode) {
+                // Defer mutation to avoid setState during render
+                setTimeout(() => {
+                  // Update just the data (keeping type as answerNode)
+                  updateNodeData(
+                    updatedNode.id,
+                    updatedNode.data,
+                    undefined, // not changing type
+                    updatedNode.position // pass position in case node needs to be added
+                  );
+                }, 0);
+              }
+            }
 
             // Save the assistant response to database immediately
             setTimeout(() => {
@@ -1106,7 +1235,7 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
     // Update the last processed count
     lastProcessedMessageCount.current = messages.length;
 
-  }, [messages, isInitialized, wrappedSendMessage, setNodesLocal, handleAddNewNodeFromAnswer, chatId, stableUserId, userName, userColor]);
+  }, [messages, isInitialized, wrappedSendMessage, setNodesLocal, handleAddNewNodeFromAnswer, chatId, stableUserId, userName, userColor, isFlowStorageLoaded, updateNodeData]);
 
   const onConnectStart: OnConnectStart = useCallback((_, { nodeId }) => {
     setConnectingNodeId(nodeId);
@@ -1144,10 +1273,12 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
               setEdgesLocal((eds: any) =>
                 eds.filter((e: any) => e.source !== connectingNodeId || e.target !== id)
               );
-              // Only delete from storage if it's loaded
-              if (isFlowStorageLoaded && deleteNode) {
-                deleteNode(id);
-              }
+              // Defer Liveblocks mutation to avoid setState during render
+              setTimeout(() => {
+                if (isFlowStorageLoaded && deleteNode) {
+                  deleteNode(id);
+                }
+              }, 0);
               nodePositionsRef.current.delete(id);
             },
           },
@@ -1163,24 +1294,44 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
           target: id,
           type: 'smoothstep',
           style: {
-            stroke: userColor || 'hsl(var(--primary))', // Use user's color or fallback
+            stroke: userColor || presenceColor || 'hsl(var(--primary))', // Use user's color or fallback
             strokeWidth: 2,
             strokeDasharray: '5,5',
+          },
+          data: {
+            creatorId: stableUserId,
+            creatorColor: userColor || presenceColor || 'hsl(var(--primary))',
           },
         };
 
         setEdgesLocal((eds: any) => eds.concat(newEdge));
 
-        // Sync to Liveblocks (only if storage is loaded)
-        if (isFlowStorageLoaded && addNode && addEdge) {
-          addNode(newNode);
-          addEdge(newEdge);
-        }
+        // Defer syncing to Liveblocks to avoid setState during render
+        setTimeout(() => {
+          if (isFlowStorageLoaded && addNode && addEdge) {
+            addNode(newNode);
+            addEdge(newEdge);
+          } else {
+            console.warn('⚠️ Storage not ready for drag-created node, will retry');
+            // Retry adding to Liveblocks when storage becomes ready
+            const retryInterval = setInterval(() => {
+              if (isFlowStorageLoaded && addNode && addEdge) {
+                console.log('🔁 Retry: Adding drag-created node and edge to Liveblocks');
+                addNode(newNode);
+                addEdge(newEdge);
+                clearInterval(retryInterval);
+              }
+            }, 100);
+
+            // Clear interval after 3 seconds
+            setTimeout(() => clearInterval(retryInterval), 3000);
+          }
+        }, 0);
       }
 
       setConnectingNodeId(null);
     },
-    [connectingNodeId, screenToFlowPosition, wrappedSendMessage, status, setNodesLocal, setEdgesLocal, isFlowStorageLoaded, addNode, deleteNode, addEdge]
+    [connectingNodeId, screenToFlowPosition, wrappedSendMessage, status, setNodesLocal, setEdgesLocal, isFlowStorageLoaded, addNode, deleteNode, addEdge, userColor, presenceColor, stableUserId]
   );
 
   const onConnect = useCallback(
@@ -1194,17 +1345,39 @@ function ChatFlowInner({ chatId, messages, status, sendMessage }: ChatFlowProps)
         sourceHandle: connection.sourceHandle,
         targetHandle: connection.targetHandle,
         style: {
-          stroke: userColor || 'hsl(var(--primary))',
+          stroke: userColor || presenceColor || 'hsl(var(--primary))',
           strokeWidth: 2,
+        },
+        data: {
+          creatorId: stableUserId,
+          creatorColor: userColor || presenceColor || 'hsl(var(--primary))',
         },
       };
 
-      // Only sync to Liveblocks if storage is loaded
-      if (isFlowStorageLoaded && addEdge) {
-        addEdge(newEdge);
-      }
+      // Add to local state first (use the full edge with style and data)
+      setEdgesLocal((edges) => [...edges, newEdge]);
+
+      // Defer Liveblocks sync to avoid setState during render
+      setTimeout(() => {
+        if (isFlowStorageLoaded && addEdge) {
+          addEdge(newEdge);
+        } else {
+          console.warn('⚠️ Storage not ready for new edge, will retry');
+          // Retry adding edge when storage becomes ready
+          const retryInterval = setInterval(() => {
+            if (isFlowStorageLoaded && addEdge) {
+              console.log('🔁 Retry: Adding edge to Liveblocks');
+              addEdge(newEdge);
+              clearInterval(retryInterval);
+            }
+          }, 100);
+
+          // Clear after 3 seconds
+          setTimeout(() => clearInterval(retryInterval), 3000);
+        }
+      }, 0);
     },
-    [isFlowStorageLoaded, addEdge, userColor]
+    [isFlowStorageLoaded, addEdge, userColor, presenceColor, stableUserId]
   );
 
   // Auto-layout function using dagre
@@ -1411,17 +1584,44 @@ function ChatFlowWithRealtime(props: ChatFlowProps) {
 }
 
 export function ChatFlow(props: ChatFlowProps) {
-  // Generate stable user ID and color
-  // Use a deterministic ID based on chatId to avoid hydration mismatches
-  const userId = useMemo(() => `user-${props.chatId.substring(0, 8)}`, [props.chatId]); // TODO: Get actual user ID
-  const userColor = useMemo(() => generateUserColor(userId), [userId]);
+  // Generate stable user ID and name from sessionStorage
+  const { userId, userName, userColor } = useMemo(() => {
+    if (typeof window !== 'undefined') {
+      let storedUserId = sessionStorage.getItem('liveblocks-user-id');
+      let storedUserName = sessionStorage.getItem('liveblocks-user-name');
+
+      if (!storedUserId) {
+        storedUserId = `user-${Math.random().toString(36).substring(2, 10)}`;
+        sessionStorage.setItem('liveblocks-user-id', storedUserId);
+      }
+
+      if (!storedUserName) {
+        const adjectives = ['Swift', 'Bright', 'Cool', 'Smart', 'Happy', 'Clever', 'Quick', 'Wise'];
+        const nouns = ['Coder', 'Builder', 'Creator', 'Maker', 'Designer', 'Thinker', 'Explorer', 'Pioneer'];
+        storedUserName = `${adjectives[Math.floor(Math.random() * adjectives.length)]} ${nouns[Math.floor(Math.random() * nouns.length)]}`;
+        sessionStorage.setItem('liveblocks-user-name', storedUserName);
+      }
+
+      const color = generateUserColor(storedUserId);
+      console.log('🎭 User identity:', { userId: storedUserId, userName: storedUserName, userColor: color });
+      return { userId: storedUserId, userName: storedUserName, userColor: color };
+    }
+
+    // Fallback for SSR
+    const fallbackId = `user-${props.chatId.substring(0, 8)}`;
+    return {
+      userId: fallbackId,
+      userName: 'Anonymous',
+      userColor: generateUserColor(fallbackId)
+    };
+  }, [props.chatId]);
 
   // Create stable initial presence
   const initialPresence = useMemo(() => ({
     cursor: null,
     user: {
       id: userId,
-      name: 'User', // TODO: Get actual user name
+      name: userName,
       avatar: undefined,
       color: userColor,
     },
@@ -1429,7 +1629,7 @@ export function ChatFlow(props: ChatFlowProps) {
     isTyping: false,
     viewportPosition: null,
     followingUserId: null,
-  }), [userId, userColor]);
+  }), [userId, userName, userColor]);
 
   // Create stable initial storage function
   const initialStorage = useCallback((): LiveblocksStorage => ({
@@ -1447,9 +1647,12 @@ export function ChatFlow(props: ChatFlowProps) {
   }), [userId]);
 
   // Initialize Liveblocks room with chat ID
+  const roomId = `chat-${props.chatId}`;
+  console.log('🏠 Initializing Liveblocks room:', roomId, 'with user:', userId, userName);
+
   return (
     <RoomProvider
-      id={`chat-${props.chatId}`}
+      id={roomId}
       initialPresence={initialPresence}
       initialStorage={initialStorage}
     >

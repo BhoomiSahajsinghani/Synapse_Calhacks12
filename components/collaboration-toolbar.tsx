@@ -127,20 +127,6 @@ export function CollaborationToolbar({
           </TooltipContent>
         </Tooltip>
 
-        {/* Presence Avatars */}
-        <AnimatePresence>
-          {(isExpanded || totalUsers <= 3) && (
-            <motion.div
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 'auto', opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden"
-            >
-              <PresenceAvatars size="sm" maxAvatars={5} />
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         {/* Follow User Dropdown */}
         {otherUsers.length > 0 && (

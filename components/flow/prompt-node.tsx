@@ -58,6 +58,8 @@ export const PromptNode = memo((props: NodeProps) => {
       return;
     }
 
+    console.log('📤 Submitting prompt from node:', id, 'with text:', input);
+
     // Send the message
     sendMessage({
       role: 'user',

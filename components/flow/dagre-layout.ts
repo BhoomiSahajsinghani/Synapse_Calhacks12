@@ -1,7 +1,8 @@
 import dagre from '@dagrejs/dagre';
 import type { Node, Edge } from '@xyflow/react';
+import { applyLayout as applySmartLayout, type LayoutType as SmartLayoutType } from '@/lib/layout-algorithms';
 
-type LayoutType = 'horizontal' | 'vertical' | 'radial' | 'tree';
+type LayoutType = 'horizontal' | 'vertical' | 'radial' | 'tree' | 'grid' | 'dagre' | 'auto';
 
 export const getLayoutedElements = <T extends Record<string, unknown> = any>(
   nodes: Node<T>[],

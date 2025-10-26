@@ -20,6 +20,7 @@ export type AnswerNodeData = {
   creatorColor?: string;
   isBeingEdited?: boolean;
   editedBy?: string;
+  isStorageReady?: boolean;
 };
 
 export const AnswerNode = memo((props: NodeProps) => {
@@ -33,7 +34,8 @@ export const AnswerNode = memo((props: NodeProps) => {
     creatorName,
     creatorColor,
     isBeingEdited,
-    editedBy
+    editedBy,
+    isStorageReady = true
   } = data;
   const [isResponseExpanded, setIsResponseExpanded] = useState(true);
   const [showSkeleton, setShowSkeleton] = useState(isLoading);
@@ -221,11 +223,17 @@ export const AnswerNode = memo((props: NodeProps) => {
           >
             <button
               onClick={handleAddNewNode}
-              className="flex w-full items-center justify-center gap-1 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+              disabled={!isStorageReady}
+              className={`flex w-full items-center justify-center gap-1 rounded px-2 py-1 text-xs ${
+                isStorageReady
+                  ? 'text-gray-500 hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200'
+                  : 'text-gray-400 cursor-not-allowed opacity-50'
+              }`}
               type="button"
+              title={!isStorageReady ? 'Waiting for connection...' : undefined}
             >
               <Plus size={14} />
-              Add Follow-up
+              {isStorageReady ? 'Add Follow-up' : 'Connecting...'}
             </button>
           </motion.div>
         )}
